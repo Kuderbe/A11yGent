@@ -1,0 +1,12 @@
+# Ensure Windows batch files always ship with CRLF line endings.
+# cmd.exe frequently refuses to parse LF-only .bat files, producing errors
+# like "The syntax of the command is incorrect." or
+# "was unexpected at this time." — even for otherwise-valid scripts.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# PowerShell also prefers CRLF on Windows.
+*.ps1 text eol=crlf
+
+# Everything else stays at LF.
+* text=lf

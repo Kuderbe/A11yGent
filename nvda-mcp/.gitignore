@@ -1,0 +1,17 @@
+# Build output
+*.nvda-addon
+*.zip
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Smoke test report (regenerated on every run)
+smoke_test_report.txt
+
+# Editor / OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
