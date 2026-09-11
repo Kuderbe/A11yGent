@@ -88,6 +88,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._ctx.speech_log.start()
 		except Exception:  # noqa: BLE001
 			log.exception("nvda-mcp: failed to attach speech listener")
+		# Same for braille: register on braille.extensions.pre_writeCells
+		# so `get_braille_state` returns fresh data as soon as any client
+		# asks. A failure here is non-fatal; the tool will just return
+		# an empty snapshot with timestamp=null.
+		try:
+			self._ctx.braille_state.start()
+		except Exception:  # noqa: BLE001
+			log.exception("nvda-mcp: failed to attach braille listener")
 
 		if config.AUTO_START:
 			try:
@@ -97,9 +105,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 		log.info(
 			"nvda-mcp: global plugin initialised "
-			"(auto_start=%s, endpoint=http://%s:%s%s, speech_attached=%s)",
+			"(auto_start=%s, endpoint=http://%s:%s%s, "
+			"speech_attached=%s, braille_attached=%s)",
 			config.AUTO_START, config.MCP_HOST, config.MCP_PORT, config.MCP_PATH,
 			self._ctx.speech_log.is_attached,
+			self._ctx.braille_state.is_attached,
 		)
 
 	def terminate(self) -> None:
@@ -107,6 +117,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._server.stop()
 		except Exception:  # noqa: BLE001
 			log.exception("nvda-mcp: error while stopping MCP server")
+		try:
+			self._ctx.braille_state.stop()
+		except Exception:  # noqa: BLE001
+			log.exception("nvda-mcp: error while detaching braille listener")
 		try:
 			self._ctx.speech_log.stop()
 		except Exception:  # noqa: BLE001

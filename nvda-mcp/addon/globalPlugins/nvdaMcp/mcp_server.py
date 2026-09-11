@@ -70,6 +70,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from . import config
 from .auth import AuthProvider, AuthError, build_default_auth
+from .braille_state import BrailleState
 from .input_bridge import (
 	InputError,
 	InputRegistry,
@@ -93,10 +94,12 @@ class ServerContext:
 	def __init__(
 		self,
 		speech_log: SpeechLog,
+		braille_state: BrailleState,
 		inputs: InputRegistry,
 		auth: AuthProvider,
 	) -> None:
 		self.speech_log = speech_log
+		self.braille_state = braille_state
 		self.inputs = inputs
 		self.auth = auth
 
@@ -1455,6 +1458,29 @@ def _build_tools(ctx: ServerContext) -> ToolRegistry:
 		input_schema={"type": "object", "properties": {}, "additionalProperties": False},
 	))
 
+	def get_braille_state() -> Dict[str, Any]:
+		_check_auth()
+		return ctx.braille_state.current()
+
+	reg.register(ToolDef(
+		name="get_braille_state",
+		description=(
+			"Return the current NVDA braille output (mirrors the built-in "
+			"Braille Viewer). Result is an object "
+			"`{cells: int[], braille_unicode: str, raw_text: str, "
+			"cell_count: int, timestamp: float | null, "
+			"display: {name: str, size: int}}`. "
+			"`cells` is one 8-bit dot pattern per cell (0..255). "
+			"`braille_unicode` is the same cells rendered as Unicode "
+			"Braille Patterns (U+2800..U+28FF), one glyph per cell. "
+			"`raw_text` is the source text before table translation. "
+			"`timestamp` is null if NVDA has not written braille yet since "
+			"this add-on session started."
+		),
+		handler=get_braille_state,
+		input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+	))
+
 	def get_server_info() -> Dict[str, Any]:
 		_check_auth()
 		return {
@@ -1801,13 +1827,22 @@ def _make_handler(
 
 		def _debug_status(self) -> Dict[str, Any]:
 			speech_log = ctx.speech_log
+			braille_state = ctx.braille_state
 			# Try to get NVDA-side ground truth about the pre_speech
 			# registrations. This tells us whether our module-level
 			# handler is actually in NVDA's _handlers dict.
 			try:
-				nvda_diag = type(speech_log).diagnostics()
+				nvda_speech_diag = type(speech_log).diagnostics()
 			except Exception as exc:  # noqa: BLE001
-				nvda_diag = {"diagnostics_error": repr(exc)}
+				nvda_speech_diag = {"diagnostics_error": repr(exc)}
+			try:
+				nvda_braille_diag = type(braille_state).diagnostics()
+			except Exception as exc:  # noqa: BLE001
+				nvda_braille_diag = {"diagnostics_error": repr(exc)}
+			try:
+				braille_snapshot = braille_state.current()
+			except Exception as exc:  # noqa: BLE001
+				braille_snapshot = {"error": repr(exc)}
 			return {
 				"server": {
 					"name": config.MCP_SERVER_NAME,
@@ -1823,7 +1858,21 @@ def _make_handler(
 					"buffered_entries": len(speech_log),
 					"next_id": getattr(speech_log, "_next_id", None),
 				},
-				"nvda_extension_points": nvda_diag,
+				"braille_state": {
+					"self_id": id(braille_state),
+					"listener_attached": getattr(braille_state, "is_attached", False),
+					"is_active_receiver": getattr(braille_state, "is_active_receiver", False),
+					"pre_write_cells_call_count": getattr(
+						braille_state, "pre_write_cells_call_count", 0,
+					),
+					"display": braille_snapshot.get("display"),
+					"cell_count": braille_snapshot.get("cell_count"),
+					"has_recorded_write": braille_snapshot.get("timestamp") is not None,
+				},
+				"nvda_extension_points": {
+					"speech": nvda_speech_diag,
+					"braille": nvda_braille_diag,
+				},
 				"input_backends": [b.name for b in ctx.inputs.all()],
 				"auth_enabled": config.ENABLE_AUTH,
 			}
@@ -1999,6 +2048,12 @@ class McpServerThread:
 def build_default_context() -> ServerContext:
 	"""Build the default :class:`ServerContext` used by the global plugin."""
 	speech_log = SpeechLog()
+	braille_state = BrailleState()
 	inputs = build_default_registry()
 	auth = build_default_auth()
-	return ServerContext(speech_log=speech_log, inputs=inputs, auth=auth)
+	return ServerContext(
+		speech_log=speech_log,
+		braille_state=braille_state,
+		inputs=inputs,
+		auth=auth,
+	)

@@ -252,7 +252,7 @@ as JSON-RPC errors.
 
 ## 3. Tools reference
 
-All eight tools live at `POST /mcp` under `tools/call`. Common
+All nine tools live at `POST /mcp` under `tools/call`. Common
 `params` envelope:
 
 ```json
@@ -418,7 +418,61 @@ Field notes:
 - If the NVDA API is unavailable (add-on run outside NVDA), returns
   `{"error": "NVDA API unavailable: ..."}`.
 
-### 3.8 `get_server_info`
+### 3.8 `get_braille_state`
+
+Snapshot of the braille row NVDA is currently rendering. This is
+the equivalent of the built-in Braille Viewer (Tools -> Braille
+viewer), and it is a second, independent ground-truth signal
+alongside `get_speech_log`: many controls, status markers, and
+formatting indicators are conveyed in braille that never appear as
+speech, and vice versa.
+
+**No arguments.**
+
+**Returns:**
+
+```json
+{
+  "cells": [45, 62, 20, 0, 0, 0],
+  "braille_unicode": "\u282d\u283e\u2814\u2800\u2800\u2800",
+  "raw_text": "Button OK",
+  "cell_count": 40,
+  "timestamp": 1735300000.123,
+  "display": {
+    "name": "No braille",
+    "size": 40
+  }
+}
+```
+
+Field notes:
+
+- `cells` is one 8-bit dot pattern per braille cell. Bits 0..7 map
+  to dots 1..8; value range is 0..255. Empty cell = 0.
+- `braille_unicode` is the same information as `cells` rendered
+  into Unicode Braille Patterns (block U+2800..U+28FF), one glyph
+  per cell. This is what the Braille Viewer window shows.
+- `raw_text` is the source string that produced those cells,
+  before translation to the active braille table. Useful when the
+  braille output uses contractions and you want the plain-text
+  interpretation.
+- `cell_count` is what NVDA is currently rendering to (may be
+  smaller than `display.size` when `filter_displayDimensions` is
+  active, e.g. via NVDA's Remote Access feature).
+- `display.name` / `display.size` come from `braille.handler`. If
+  no physical display is connected, `name` will typically be
+  `"No braille"` and `size` may be 0.
+- `timestamp` is `null` until NVDA has written braille at least
+  once since this add-on session started. Data hooks into
+  `braille.extensions.pre_writeCells`, which fires whenever NVDA
+  updates its braille output, including when the Braille Viewer
+  is the sole receiver. If `timestamp` never becomes non-null,
+  either NVDA has not rendered braille yet (open the Braille
+  Viewer or connect a display to force writes) or the extension
+  point registration failed (check `GET /debug/status` under
+  `nvda_extension_points.braille`).
+
+### 3.9 `get_server_info`
 
 Metadata about the running server.
 
@@ -665,7 +719,7 @@ any add-on and none of the above will appear.
 ### 10.3 Smoke test
 
 `tests/smoke_test.py` on the Windows host drives the server with
-the official `mcp` v2 SDK client through all 8 tools. Exit codes:
+the official `mcp` v2 SDK client through all 9 tools. Exit codes:
 `0` OK, `1` unreachable, `2` handshake failed, `3` tool call
 failed, `4` keyboard injection failed, `10` SDK missing,
 `20` Ctrl+C, `99` other. Full report is written to

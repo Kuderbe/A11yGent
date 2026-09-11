@@ -169,6 +169,7 @@ system context.
 | `send_keys`        | `(gestures:list[str], delay_ms:int=0) → {ok, sent}`                | Sequence of key gestures. |
 | `type_text`        | `(text:str, delay_ms:int=0) → {ok, sent, requested}`               | Type an arbitrary string. |
 | `get_focus_info`   | `() → {role, name, value, states, …}`                              | Snapshot of the currently focused UI object. |
+| `get_braille_state`| `() → {cells:int[], braille_unicode, raw_text, cell_count, timestamp, display:{name,size}}` | Snapshot of the row NVDA is currently rendering to braille (equivalent of the built-in Braille Viewer). |
 | `get_server_info`  | `() → {name, version, host, port, path, …}`                        | Server metadata for capability discovery. |
 
 An `Entry` is `{id:int, timestamp:float, text:str}`.
@@ -305,6 +306,7 @@ and run **"Cline: Open MCP Settings"**. Add an entry under
         "get_speech_log",
         "get_last_spoken",
         "get_focus_info",
+        "get_braille_state",
         "get_server_info"
       ]
     }
@@ -322,9 +324,9 @@ the desired behaviour for a screen-reader-driving agent.
 Once saved, Cline discovers the server automatically. The MCP-server
 panel in Cline should list `nvda-mcp` as "connected" and show:
 
-- **Tools** (8): `get_speech_log`, `get_last_spoken`,
+- **Tools** (9): `get_speech_log`, `get_last_spoken`,
   `clear_speech_log`, `send_key`, `send_keys`, `type_text`,
-  `get_focus_info`, `get_server_info`.
+  `get_focus_info`, `get_braille_state`, `get_server_info`.
 - **Prompts** (4): `nvda_agent_playbook`, `quick_nav_walkthrough`,
   `accessibility_audit`, `capture_and_explain` — surfaced as
   slash-commands.
@@ -445,7 +447,7 @@ What it checks, in order:
    bespoke diagnosis for each failure mode (connection refused, timeout,
    non-HTTP service, etc.), plus a pointer to `%APPDATA%\nvda\nvda.log`.
 3. MCP `initialize` handshake — prints the server-advertised name/version.
-4. `tools/list` — verifies all 8 v1 tools are present.
+4. `tools/list` — verifies all 9 v1 tools are present.
 5. `get_server_info` round-trip.
 6. Speech log: `clear_speech_log` → 3-second window to make NVDA speak →
    `get_speech_log` / `get_last_spoken`. Warns if the log is empty.
@@ -509,6 +511,8 @@ implementation.
   tool registry, HTTP handler.
 - `addon/globalPlugins/nvdaMcp/speech_log.py` – how the Speech Viewer
   content is captured.
+- `addon/globalPlugins/nvdaMcp/braille_state.py` – how the current
+  braille output is captured (Braille Viewer equivalent).
 - `addon/globalPlugins/nvdaMcp/input_bridge.py` – how keys are injected.
 
 ## License

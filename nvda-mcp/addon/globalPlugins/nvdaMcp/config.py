@@ -100,7 +100,7 @@ MCP_PATH: str = "/mcp"
 MCP_SERVER_NAME: str = "nvda-mcp"
 
 #: Server version reported to MCP clients.
-MCP_SERVER_VERSION: str = "0.1.0"
+MCP_SERVER_VERSION: str = "0.2.0"
 
 #: Whether to auto-start the MCP server when the plugin loads.
 AUTO_START: bool = True
