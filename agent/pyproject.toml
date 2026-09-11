@@ -1,0 +1,21 @@
+[project]
+name = "a11y_gent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Benedikt Kuder (SAP)", email = "benedikt.kuder@sap.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "langgraph>=1.2.11",
+    "openai>=3.10.0",
+    "python-dotenv>=1.2.3",
+]
+
+[project.scripts]
+a11y_gent = "a11y_gent.main:main"
+
+[build-system]
+requires = ["uv_build>=0.12.11,<0.13.0"]
+build-backend = "uv_build"
