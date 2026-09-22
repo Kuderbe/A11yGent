@@ -25,13 +25,20 @@ class OpenaiLlmClient(LlmClient):
 
 
 
-    async def infer(self, history: list[Message], model: str) -> LlmResponse:
+    async def infer(
+        self, history: list[Message], model: str, use_tools: bool = True
+    ) -> LlmResponse:
         messages = [OpenaiLlmClient._convert_message(m) for m in history]
         tools = [self._convert_tool(tool) for tool in self._tools]
+
+        # Suppress tool calls for the reasoning-only step; tools stay advertised.
+        tool_choice = "auto" if use_tools else "none"
+
         res = await self._client.chat.completions.create(
             model=model,
             messages=messages,
             tools=tools,
+            tool_choice=tool_choice,
         )
 
         choice = res.choices[0]
