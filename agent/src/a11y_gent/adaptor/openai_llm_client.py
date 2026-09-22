@@ -6,32 +6,39 @@ from a11y_gent.model.tool_call import ToolCall
 from collections.abc import Callable
 import inspect
 import json
-from openai import OpenAI
+from openai import AsyncOpenAI
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from openai.types.chat.chat_completion_tool_union_param import ChatCompletionToolUnionParam
-from typing import Any, cast
+from typing import Any, cast, get_args, get_origin
 
 
 class OpenaiLlmClient(LlmClient):
-    _client: OpenAI
+    _client: AsyncOpenAI
     _tools: list[Tool]
     
 
     def __init__(self, base_url: str, api_key: str, tools: list[Tool]):
         super().__init__()
 
-        self._client = OpenAI(base_url=base_url, api_key=api_key)
+        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self._tools = tools
 
 
 
-    def infer(self, history: list[Message], model: str) -> LlmResponse:
+    async def infer(
+        self, history: list[Message], model: str, use_tools: bool = True
+    ) -> LlmResponse:
         messages = [OpenaiLlmClient._convert_message(m) for m in history]
         tools = [self._convert_tool(tool) for tool in self._tools]
-        res = self._client.chat.completions.create(
+
+        # Suppress tool calls for the reasoning-only step; tools stay advertised.
+        tool_choice = "auto" if use_tools else "none"
+
+        res = await self._client.chat.completions.create(
             model=model,
             messages=messages,
             tools=tools,
+            tool_choice=tool_choice,
         )
 
         choice = res.choices[0]
@@ -86,8 +93,10 @@ class OpenaiLlmClient(LlmClient):
         return cast(ChatCompletionMessageParam, res)
 
 
-    def execute_tool_call(self, tool_call: ToolCall) -> Message:
+    async def execute_tool_call(self, tool_call: ToolCall) -> Message:
         result = tool_call["tool"]["tool_function"](**tool_call["arguments"])
+        if inspect.isawaitable(result):
+            result = await result
 
         return {
             "origin": MessageOrigin.TOOL,
@@ -136,9 +145,16 @@ class OpenaiLlmClient(LlmClient):
             ):
                 continue
 
-            parameters["properties"][parameter.name] = {
+            property_schema: dict[str, Any] = {
                 "type": OpenaiLlmClient._json_schema_type(parameter.annotation),
             }
+            if property_schema["type"] == "array":
+                property_schema["items"] = {
+                    "type": OpenaiLlmClient._json_schema_array_item_type(
+                        parameter.annotation
+                    ),
+                }
+            parameters["properties"][parameter.name] = property_schema
 
             if parameter.default is inspect.Parameter.empty:
                 parameters["required"].append(parameter.name)
@@ -157,6 +173,7 @@ class OpenaiLlmClient(LlmClient):
 
     @staticmethod
     def _json_schema_type(annotation: Any) -> str:
+        origin = get_origin(annotation)
         match annotation:
             case inspect.Parameter.empty:
                 return "string"
@@ -168,5 +185,19 @@ class OpenaiLlmClient(LlmClient):
                 return "number"
             case _ if annotation is bool:
                 return "boolean"
+            case _ if annotation is list or origin in (list, tuple, set):
+                return "array"
+            case _ if annotation is dict or origin is dict:
+                return "object"
             case _:
                 return "string"
+
+
+    @staticmethod
+    def _json_schema_array_item_type(annotation: Any) -> str:
+        # For parameterised generics like list[int] use the element type;
+        # bare `list` (or anything unparameterised) defaults to string.
+        args = get_args(annotation)
+        if args:
+            return OpenaiLlmClient._json_schema_type(args[0])
+        return "string"
