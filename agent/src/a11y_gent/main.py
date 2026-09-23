@@ -72,6 +72,7 @@ async def main_async():
                 "llm": llm,
                 "task": task,
                 "discovery_context": seed_context,
+                "pending_tool_calls": [],
                 "step_count": 0,
             }
         )
@@ -135,7 +136,7 @@ async def act_node(state: GraphState):
 async def execute_tools_node(state: GraphState):
     tool_messages = [
         await state["llm"].execute_tool_call(tool_call)
-        for tool_call in state.get("pending_tool_calls", [])
+        for tool_call in state["pending_tool_calls"]
     ]
 
     return {

@@ -1,4 +1,4 @@
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 
 from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.model.message import Message
@@ -11,5 +11,5 @@ class GraphState(TypedDict):
     task: Task
 
     discovery_context: list[Message]
-    pending_tool_calls: NotRequired[list[ToolCall]]
+    pending_tool_calls: list[ToolCall]
     step_count: int
