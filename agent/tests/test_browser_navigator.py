@@ -1,8 +1,8 @@
 """Tests for the setup-only browser navigator (a11y_gent.adaptor.browser_navigator).
 
 Offline, no browser/network: a fake MCP session records the tool call the
-navigator makes, verifying it uses the Chrome DevTools navigate_page tool with
-the URL.
+navigator makes, verifying it uses the Chrome DevTools new_page tool with the
+URL.
 
 Run standalone with the stdlib:
 
@@ -22,13 +22,14 @@ class _FakeSession:
         self.calls.append((name, arguments))
 
 
-def test_open_calls_navigate_page_with_url():
+def test_open_calls_new_page_with_url():
     session = _FakeSession()
     navigator = McpBrowserNavigator(session)
 
     asyncio.run(navigator.open("http://example.test/page"))
 
-    assert session.calls == [("navigate_page", {"url": "http://example.test/page"})]
+    assert session.calls == [("new_page", {"url": "http://example.test/page"})]
+
 
 
 def _run_all():

@@ -6,12 +6,13 @@ is never registered as an agent tool -- the model cannot see or call it.
 
 :class:`BrowserNavigator` is the narrow interface the runner depends on;
 :class:`McpBrowserNavigator` drives a Chrome DevTools MCP session to open a URL
-via its ``navigate_page`` tool.
+via its ``new_page`` tool (which creates a page for the URL without needing a
+pre-existing page id).
 """
 
 from typing import Any, Protocol
 
-_NAVIGATE_TOOL = "navigate_page"
+_NEW_PAGE_TOOL = "new_page"
 
 
 class BrowserNavigator(Protocol):
@@ -26,5 +27,5 @@ class McpBrowserNavigator:
         self._session = session
 
     async def open(self, url: str) -> None:
-        await self._session.call_tool(_NAVIGATE_TOOL, {"url": url})
+        await self._session.call_tool(_NEW_PAGE_TOOL, {"url": url})
 
