@@ -9,6 +9,8 @@ from a11y_gent.model.tool_call import ToolCall
 class GraphState(TypedDict):
     llm: LlmClient
     task: Task
+    model: str
+    max_steps: int
 
     discovery_context: list[Message]
     pending_tool_calls: list[ToolCall]
