@@ -12,6 +12,7 @@ dependencies = [
     "mcp>=2.0,<3.0",
     "openai>=3.10.0",
     "python-dotenv>=1.2.3",
+    "typer>=0.27.2",
 ]
 
 [project.scripts]

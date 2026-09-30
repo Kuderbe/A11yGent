@@ -1,9 +1,11 @@
 import asyncio
 import os
+from typing import Optional
 
+import typer
 from a11y_gent.adaptor.mcp_tools import register_mcp_tools
 from a11y_gent.adaptor.openai_llm_client import OpenaiLlmClient
-from a11y_gent.model.task import Task
+from a11y_gent.config import RunConfig, build_task
 from a11y_gent.runner import AgentRunner
 from a11y_gent.tooling.barrier import make_barrier_tool
 from a11y_gent.tooling.verdict import make_verdict_tool
@@ -12,42 +14,69 @@ from mcp import Client
 
 load_dotenv()
 
-
-MODEL = "gpt-5-mini"
-
-# Safety net for a run that never reports a verdict.
-MAX_STEPS = 30
+app = typer.Typer(add_completion=False, help="Run the A11yGent screen-reader agent on a task.")
 
 
-def main():
-    asyncio.run(main_async())
+@app.command()
+def run(
+    url: str = typer.Option(..., help="URL of the page/app under test."),
+    goal: str = typer.Option(..., help="The user story / task to attempt."),
+    success_hint: Optional[str] = typer.Option(
+        None, help="Optional note describing what 'done' looks like."
+    ),
+    model: str = typer.Option(
+        "gpt-5-mini", envvar="A11Y_GENT_MODEL", help="LLM model name."
+    ),
+    nvda_mcp_url: str = typer.Option(
+        "http://192.168.64.4:8765/mcp",
+        envvar="A11Y_GENT_MCP_URL",
+        help="URL of the NVDA MCP bridge.",
+    ),
+    max_steps: int = typer.Option(
+        30, help="Safety net: stop after this many reasoning steps."
+    ),
+    out: str = typer.Option(
+        "trajectory.jsonl", help="Where to write the trajectory JSONL."
+    ),
+) -> None:
+    """Attempt GOAL on URL as a screen-reader user and report a verdict."""
+    config = RunConfig(
+        task=build_task(url, goal, success_hint),
+        model=model,
+        openai_base_url=os.environ["A11Y_GENT_OPENAI_BASE_URL"],
+        openai_api_key=os.environ["A11Y_GENT_OPENAI_API_KEY"],
+        nvda_mcp_url=nvda_mcp_url,
+        max_steps=max_steps,
+        trajectory_path=out,
+    )
+    result = asyncio.run(_run(config))
+    print("Verdict:", result["verdict"])
 
 
-async def main_async():
-    base_url = os.environ["A11Y_GENT_OPENAI_BASE_URL"]
-    api_key = os.environ["A11Y_GENT_OPENAI_API_KEY"]
-    mcp_url = os.environ.get("A11Y_GENT_MCP_URL", "http://192.168.64.4:8765/mcp")
-
-    # Fixed demo task until a task provider supplies these.
-    task: Task = {
-        "url": "http://127.0.0.1:8080/barrier.html",
-        "goal": "Subscribe to the newsletter using the Subscribe button.",
-    }
-
+async def _run(config: RunConfig):
     local_tools = [make_verdict_tool(), make_barrier_tool()]
 
     # One persistent MCP session shared by every tool for the whole run.
-    async with Client(mcp_url) as session:
+    async with Client(config.nvda_mcp_url) as session:
         mcp_tools = await register_mcp_tools(session)
         tools = [*local_tools, *mcp_tools]
 
-        llm = OpenaiLlmClient(base_url, api_key, tools)
+        llm = OpenaiLlmClient(
+            config.openai_base_url, config.openai_api_key, tools
+        )
 
-        result = await AgentRunner(
-            llm, task, MODEL, MAX_STEPS, "trajectory.jsonl"
+        return await AgentRunner(
+            llm,
+            config.task,
+            config.model,
+            config.max_steps,
+            config.trajectory_path,
         ).run()
 
-        print("Verdict:", result["verdict"])
+
+def main():
+    app()
+
 
 
 
