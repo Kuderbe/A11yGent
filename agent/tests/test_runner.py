@@ -74,17 +74,38 @@ class _ScriptedLlm(LlmClient):
 _TASK = {"url": "http://example.test/barrier.html", "goal": "Do the thing."}
 
 
+class _FakeNavigator:
+    """Records the URL it was asked to open; does nothing else."""
+
+    def __init__(self):
+        self.opened = None
+
+    async def open(self, url):
+        self.opened = url
+
+
 def _run(llm, max_steps=30):
+    navigator = _FakeNavigator()
     with tempfile.TemporaryDirectory() as tmp:
         path = str(Path(tmp) / "trajectory.jsonl")
         result = asyncio.run(
-            AgentRunner(llm, _TASK, "m", max_steps, path).run()
+            AgentRunner(llm, navigator, _TASK, "m", max_steps, path).run()
         )
         records = [
             json.loads(line)
             for line in Path(path).read_text(encoding="utf-8").splitlines()
         ]
-    return result, records
+    return result, records, navigator
+
+
+def test_runner_navigates_to_task_url_before_running():
+    llm = _ScriptedLlm(
+        [[_tool_call(_VERDICT_TOOL, "v1", {"status": "succeeded", "summary": "ok"})]]
+    )
+
+    _, _, navigator = _run(llm)
+
+    assert navigator.opened == _TASK["url"]
 
 
 def test_runner_returns_reported_verdict_and_barriers():
@@ -95,7 +116,7 @@ def test_runner_returns_reported_verdict_and_barriers():
         ]
     )
 
-    result, _ = _run(llm)
+    result, _, _ = _run(llm)
 
     assert result["task"] == _TASK
     assert result["verdict"]["status"] == VerdictStatus.FAILED
@@ -109,7 +130,7 @@ def test_runner_writes_trajectory():
         [[_tool_call(_VERDICT_TOOL, "v1", {"status": "succeeded", "summary": "ok"})]]
     )
 
-    _, records = _run(llm)
+    _, records, _ = _run(llm)
 
     assert records[0]["role"] == "system"
     assert any(r["role"] == "action" for r in records)
@@ -123,10 +144,11 @@ def test_runner_normalises_step_cap_to_failed_verdict():
          for i in range(50)]
     )
 
-    result, _ = _run(llm, max_steps=4)
+    result, _, _ = _run(llm, max_steps=4)
 
     assert result["verdict"]["status"] == VerdictStatus.FAILED
     assert "4 steps" in result["verdict"]["summary"]
+
 
 
 def _run_all():

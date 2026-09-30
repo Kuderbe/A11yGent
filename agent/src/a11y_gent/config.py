@@ -18,6 +18,7 @@ class RunConfig:
     openai_base_url: str
     openai_api_key: str
     nvda_mcp_url: str
+    browser_mcp_url: str
     max_steps: int
     trajectory_path: str
 

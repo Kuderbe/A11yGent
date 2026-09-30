@@ -63,7 +63,12 @@ def test_build_task_with_hint():
 
 def test_cli_builds_config_from_options():
     result, config = _invoke(
-        ["--url", "http://x", "--goal", "do it", "--success-hint", "done when Y"]
+        [
+            "--url", "http://x",
+            "--goal", "do it",
+            "--success-hint", "done when Y",
+            "--browser-mcp-url", "http://browser/mcp",
+        ]
     )
     assert result.exit_code == 0, result.output
     assert config.task == {
@@ -74,32 +79,47 @@ def test_cli_builds_config_from_options():
     assert config.openai_base_url == "http://base"
     assert config.openai_api_key == "key"
     assert config.model == "gpt-5-mini"
+    assert config.browser_mcp_url == "http://browser/mcp"
     assert config.max_steps == 30
 
 
 def test_cli_requires_url_and_goal():
-    result, _ = _invoke(["--url", "http://x"])
+    result, _ = _invoke(["--url", "http://x", "--browser-mcp-url", "http://b/mcp"])
     assert result.exit_code != 0
 
 
-def test_cli_reads_model_and_mcp_url_from_env():
+def test_cli_requires_browser_mcp_url():
+    result, _ = _invoke(["--url", "http://x", "--goal", "g"])
+    assert result.exit_code != 0
+
+
+def test_cli_reads_model_and_mcp_urls_from_env():
     _, config = _invoke(
         ["--url", "http://x", "--goal", "g"],
         env={
             "A11Y_GENT_MODEL": "gpt-4o",
             "A11Y_GENT_MCP_URL": "http://bridge/mcp",
+            "A11Y_GENT_BROWSER_MCP_URL": "http://browser-env/mcp",
         },
     )
     assert config.model == "gpt-4o"
     assert config.nvda_mcp_url == "http://bridge/mcp"
+    assert config.browser_mcp_url == "http://browser-env/mcp"
 
 
 def test_cli_options_override_defaults():
     _, config = _invoke(
-        ["--url", "http://x", "--goal", "g", "--max-steps", "5", "--out", "t.jsonl"]
+        [
+            "--url", "http://x",
+            "--goal", "g",
+            "--browser-mcp-url", "http://b/mcp",
+            "--max-steps", "5",
+            "--out", "t.jsonl",
+        ]
     )
     assert config.max_steps == 5
     assert config.trajectory_path == "t.jsonl"
+
 
 
 def _run_all():

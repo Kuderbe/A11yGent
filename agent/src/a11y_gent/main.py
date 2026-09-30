@@ -3,6 +3,7 @@ import os
 from typing import Optional
 
 import typer
+from a11y_gent.adaptor.browser_navigator import McpBrowserNavigator
 from a11y_gent.adaptor.mcp_tools import register_mcp_tools
 from a11y_gent.adaptor.openai_llm_client import OpenaiLlmClient
 from a11y_gent.config import RunConfig, build_task
@@ -30,7 +31,12 @@ def run(
     nvda_mcp_url: str = typer.Option(
         "http://192.168.64.4:8765/mcp",
         envvar="A11Y_GENT_MCP_URL",
-        help="URL of the NVDA MCP bridge.",
+        help="URL of the NVDA MCP bridge (its tools drive the agent).",
+    ),
+    browser_mcp_url: str = typer.Option(
+        ...,
+        envvar="A11Y_GENT_BROWSER_MCP_URL",
+        help="URL of the setup-only Chrome DevTools MCP (loads the page; not an agent tool).",
     ),
     max_steps: int = typer.Option(
         30, help="Safety net: stop after this many reasoning steps."
@@ -46,6 +52,7 @@ def run(
         openai_base_url=os.environ["A11Y_GENT_OPENAI_BASE_URL"],
         openai_api_key=os.environ["A11Y_GENT_OPENAI_API_KEY"],
         nvda_mcp_url=nvda_mcp_url,
+        browser_mcp_url=browser_mcp_url,
         max_steps=max_steps,
         trajectory_path=out,
     )
@@ -56,17 +63,21 @@ def run(
 async def _run(config: RunConfig):
     local_tools = [make_verdict_tool(), make_barrier_tool()]
 
-    # One persistent MCP session shared by every tool for the whole run.
-    async with Client(config.nvda_mcp_url) as session:
-        mcp_tools = await register_mcp_tools(session)
+    # Two MCP sessions: the NVDA bridge supplies the agent's tools; the browser
+    # session is setup-only (loads the page) and is never given to the model.
+    async with Client(config.nvda_mcp_url) as nvda_session, \
+            Client(config.browser_mcp_url) as browser_session:
+        mcp_tools = await register_mcp_tools(nvda_session)
         tools = [*local_tools, *mcp_tools]
 
         llm = OpenaiLlmClient(
             config.openai_base_url, config.openai_api_key, tools
         )
+        navigator = McpBrowserNavigator(browser_session)
 
         return await AgentRunner(
             llm,
+            navigator,
             config.task,
             config.model,
             config.max_steps,
@@ -76,6 +87,7 @@ async def _run(config: RunConfig):
 
 def main():
     app()
+
 
 
 
