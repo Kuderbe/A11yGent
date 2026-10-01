@@ -12,13 +12,8 @@ Run standalone with the stdlib:
 import os
 
 from a11y_gent import main as main_module
-from a11y_gent.config import (
-    BrowserMcpSpec,
-    build_browser_client_target,
-    build_task,
-)
+from a11y_gent.config import build_task
 from a11y_gent.model.verdict import VerdictStatus
-from mcp import StdioServerParameters
 from typer.testing import CliRunner
 
 
@@ -72,8 +67,6 @@ def test_cli_builds_config_from_options():
             "--url", "http://x",
             "--goal", "do it",
             "--success-hint", "done when Y",
-            "--browser-mcp-mode", "url",
-            "--browser-mcp-url", "http://browser/mcp",
         ]
     )
     assert result.exit_code == 0, result.output
@@ -85,24 +78,13 @@ def test_cli_builds_config_from_options():
     assert config.openai_base_url == "http://base"
     assert config.openai_api_key == "key"
     assert config.model == "gpt-5-mini"
-    assert config.browser_mcp.mode == "url"
-    assert config.browser_mcp.url == "http://browser/mcp"
     assert config.max_steps == 30
 
 
-def test_cli_defaults_to_stdio_browser_mode():
+def test_cli_does_not_require_browser_mcp_options():
     result, config = _invoke(["--url", "http://x", "--goal", "g"])
     assert result.exit_code == 0, result.output
-    assert config.browser_mcp.mode == "stdio"
-    assert config.browser_mcp.url is None
-
-
-def test_cli_stdio_passes_chrome_url():
-    _, config = _invoke(
-        ["--url", "http://x", "--goal", "g", "--browser-chrome-url", "http://127.0.0.1:9222"]
-    )
-    assert config.browser_mcp.mode == "stdio"
-    assert config.browser_mcp.chrome_url == "http://127.0.0.1:9222"
+    assert config.nvda_mcp_url == "http://192.168.64.4:8765/mcp"
 
 
 def test_cli_requires_url_and_goal():
@@ -110,20 +92,16 @@ def test_cli_requires_url_and_goal():
     assert result.exit_code != 0
 
 
-def test_cli_reads_model_and_mcp_urls_from_env():
+def test_cli_reads_model_and_nvda_mcp_url_from_env():
     _, config = _invoke(
         ["--url", "http://x", "--goal", "g"],
         env={
             "A11Y_GENT_MODEL": "gpt-4o",
             "A11Y_GENT_MCP_URL": "http://bridge/mcp",
-            "A11Y_GENT_BROWSER_MCP_MODE": "url",
-            "A11Y_GENT_BROWSER_MCP_URL": "http://browser-env/mcp",
         },
     )
     assert config.model == "gpt-4o"
     assert config.nvda_mcp_url == "http://bridge/mcp"
-    assert config.browser_mcp.mode == "url"
-    assert config.browser_mcp.url == "http://browser-env/mcp"
 
 
 def test_cli_options_override_defaults():
@@ -137,45 +115,6 @@ def test_cli_options_override_defaults():
     )
     assert config.max_steps == 5
     assert config.trajectory_path == "t.jsonl"
-
-
-def test_build_browser_client_target_url():
-    target = build_browser_client_target(BrowserMcpSpec(mode="url", url="http://b/mcp"))
-    assert target == "http://b/mcp"
-
-
-def test_build_browser_client_target_url_requires_url():
-    try:
-        build_browser_client_target(BrowserMcpSpec(mode="url", url=None))
-    except ValueError:
-        return
-    raise AssertionError("expected ValueError for url mode without url")
-
-
-def test_build_browser_client_target_stdio_defaults():
-    target = build_browser_client_target(BrowserMcpSpec(mode="stdio"))
-    assert isinstance(target, StdioServerParameters)
-    assert target.command == "npx"
-    assert target.args == ["-y", "chrome-devtools-mcp@latest"]
-
-
-def test_build_browser_client_target_stdio_with_options():
-    target = build_browser_client_target(
-        BrowserMcpSpec(
-            mode="stdio",
-            chrome_url="http://127.0.0.1:9222",
-            channel="stable",
-            executable="/path/to/edge",
-        )
-    )
-    assert target.args == [
-        "-y",
-        "chrome-devtools-mcp@latest",
-        "--browser-url=http://127.0.0.1:9222",
-        "--channel=stable",
-        "--executable-path=/path/to/edge",
-    ]
-
 
 
 

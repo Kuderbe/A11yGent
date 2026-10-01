@@ -1,7 +1,7 @@
 """Orchestrate a single agent run.
 
-:class:`AgentRunner` navigates the browser to the task URL (setup, via a
-:class:`~a11y_gent.adaptor.browser_navigator.BrowserNavigator`), seeds the
+:class:`AgentRunner` loads the task URL through NVDA (setup, via a
+:class:`~a11y_gent.adaptor.nvda_navigator.TaskNavigator`), seeds the
 conversation (system prompt, few-shot exemplars, the task), drives the reason ->
 act -> observe loop to completion, writes the trajectory, and returns a
 :class:`RunResult`. A run always yields a verdict: if the agent never reports
@@ -9,7 +9,7 @@ one within the step cap, the runner records a FAILED verdict for a task it could
 not solve in that many steps.
 """
 
-from a11y_gent.adaptor.browser_navigator import BrowserNavigator
+from a11y_gent.adaptor.nvda_navigator import TaskNavigator
 from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.model.message import MessageOrigin
 from a11y_gent.model.run_result import RunResult
@@ -27,7 +27,7 @@ class AgentRunner:
     def __init__(
         self,
         llm: LlmClient,
-        navigator: BrowserNavigator,
+        navigator: TaskNavigator,
         task: Task,
         model: str,
         max_steps: int,
