@@ -1,6 +1,8 @@
 import asyncio
 import os
 from typing import Optional
+from urllib.parse import urlparse
+from uuid import uuid4
 
 import typer
 from a11y_gent.adaptor.mcp_tools import register_mcp_tools
@@ -16,6 +18,13 @@ from mcp import Client
 load_dotenv()
 
 app = typer.Typer(add_completion=False, help="Run the A11yGent screen-reader agent on a task.")
+
+
+def _additional_headers_for(base_url: str) -> dict[str, str]:
+    hostname = urlparse(base_url).hostname
+    if hostname is None or not (hostname == "opencode.ai" or hostname.endswith(".opencode.ai")):
+        return {}
+    return {"x-opencode-session": str(uuid4())}
 
 
 @app.command()
@@ -63,7 +72,10 @@ async def _run(config: RunConfig):
         tools = [*local_tools, *mcp_tools]
 
         llm = OpenaiLlmClient(
-            config.openai_base_url, config.openai_api_key, tools
+            config.openai_base_url,
+            config.openai_api_key,
+            tools,
+            _additional_headers_for(config.openai_base_url),
         )
         navigator = McpNvdaNavigator(nvda_session)
 

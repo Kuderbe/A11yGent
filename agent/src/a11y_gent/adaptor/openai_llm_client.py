@@ -17,10 +17,20 @@ class OpenaiLlmClient(LlmClient):
     _tools: list[Tool]
     
 
-    def __init__(self, base_url: str, api_key: str, tools: list[Tool]):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        tools: list[Tool],
+        additional_headers: dict[str, str] = {},
+    ):
         super().__init__()
 
-        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        self._client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            default_headers=additional_headers,
+        )
         self._tools = tools
 
 
