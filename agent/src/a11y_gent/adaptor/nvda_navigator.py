@@ -6,6 +6,7 @@ programmatic browser navigation from a separate process.
 """
 
 import asyncio
+import logging
 from typing import Any, Protocol
 
 _LOAD_TIMEOUT_SECONDS = 10
@@ -13,6 +14,8 @@ _POLL_INTERVAL_SECONDS = 0.1
 _EDGE_EXECUTABLE = r"C:\PROGRA~2\Microsoft\Edge\Application\msedge.exe"
 _RUN_DIALOG_SETTLE_SECONDS = 0.8
 _TYPE_DELAY_MS = 15
+
+logger = logging.getLogger(__name__)
 
 
 class TaskNavigator(Protocol):
@@ -54,7 +57,12 @@ class McpNvdaNavigator:
                 return
             await asyncio.sleep(self._poll_interval_seconds)
             elapsed += self._poll_interval_seconds
-        raise TimeoutError("NVDA did not announce that the task page finished loading")
+        # NVDA sometimes omits this announcement; investigate why separately.
+        logger.warning(
+            "NVDA did not announce that the task page finished loading within %ss; "
+            "continuing with the page as it is",
+            self._load_timeout_seconds,
+        )
 
 
 def _result_text(result: Any) -> str:

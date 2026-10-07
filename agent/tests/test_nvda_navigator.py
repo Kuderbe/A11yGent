@@ -10,6 +10,7 @@ Run standalone with the stdlib:
 """
 
 import asyncio
+import logging
 
 from a11y_gent.adaptor.nvda_navigator import McpNvdaNavigator
 
@@ -66,7 +67,7 @@ def test_open_launches_edge_waits_for_load_and_moves_to_document_start():
     ]
 
 
-def test_open_times_out_without_load_complete():
+def test_open_continues_with_warning_without_load_complete():
     session = _FakeSession(speech="Loading page")
     navigator = McpNvdaNavigator(
         session,
@@ -74,14 +75,22 @@ def test_open_times_out_without_load_complete():
         poll_interval_seconds=0.001,
     )
 
-    async def run():
-        try:
-            await navigator.open("http://example.test/page")
-        except TimeoutError:
-            return
-        raise AssertionError("expected TimeoutError")
+    logger = logging.getLogger("a11y_gent.adaptor.nvda_navigator")
+    records = []
 
-    asyncio.run(run())
+    class _Handler(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Handler()
+    logger.addHandler(handler)
+    try:
+        asyncio.run(navigator.open("http://example.test/page"))
+    finally:
+        logger.removeHandler(handler)
+
+    assert any(record.levelno == logging.WARNING for record in records)
+    assert session.calls[-1] == ("send_key", {"gesture": "control+home"})
 
 
 def _run_all():
