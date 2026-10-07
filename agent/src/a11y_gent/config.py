@@ -9,6 +9,7 @@ argument parsing.
 from dataclasses import dataclass
 
 from a11y_gent.model.task import Task
+from a11y_gent.observability import LogLevel
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,8 @@ class RunConfig:
     nvda_mcp_url: str
     max_steps: int
     trajectory_path: str
+    log_level: LogLevel = LogLevel.INFO
+    log_file_template: str | None = None
 
 
 def build_task(url: str, goal: str, success_hint: str | None) -> Task:

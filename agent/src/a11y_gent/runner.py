@@ -15,6 +15,7 @@ from a11y_gent.model.message import MessageOrigin
 from a11y_gent.model.run_result import RunResult
 from a11y_gent.model.task import Task
 from a11y_gent.model.verdict import Verdict, VerdictStatus
+from a11y_gent import observability
 from a11y_gent.prompts import build_system_prompt, few_shot_exemplars
 from a11y_gent.runtime import build_agent_graph
 from a11y_gent.tooling.extract import extract_barriers, extract_verdict
@@ -60,10 +61,21 @@ class AgentRunner:
 
         history = res["discovery_context"]
         write_jsonl(history, self._trajectory_path)
+        observability.info(
+            "trajectory.written",
+            path=self._trajectory_path,
+            record_count=len(history),
+        )
 
+        verdict = self._resolve_verdict(history)
+        observability.info(
+            "run.result",
+            status=str(verdict["status"]),
+            barrier_count=len(verdict["barriers"]),
+        )
         return {
             "task": self._task,
-            "verdict": self._resolve_verdict(history),
+            "verdict": verdict,
             "trajectory_path": self._trajectory_path,
         }
 

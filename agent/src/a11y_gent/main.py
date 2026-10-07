@@ -9,6 +9,8 @@ from a11y_gent.adaptor.mcp_tools import register_mcp_tools
 from a11y_gent.adaptor.nvda_navigator import McpNvdaNavigator
 from a11y_gent.adaptor.openai_llm_client import OpenaiLlmClient
 from a11y_gent.config import RunConfig, build_task
+from a11y_gent import observability
+from a11y_gent.observability import LogLevel
 from a11y_gent.runner import AgentRunner
 from a11y_gent.tooling.barrier import make_barrier_tool
 from a11y_gent.tooling.verdict import make_verdict_tool
@@ -48,6 +50,11 @@ def run(
     out: str = typer.Option(
         "trajectory.jsonl", help="Where to write the trajectory JSONL."
     ),
+    log_level: LogLevel = typer.Option(LogLevel.INFO, help="Log detail: info, verbose, or debug."),
+    log_file: str | None = typer.Option(
+        None,
+        help="Optional log-file template; supports <TIMESTAMP> and <RUN_ID>.",
+    ),
 ) -> None:
     """Attempt GOAL on URL as a screen-reader user and report a verdict."""
     config = RunConfig(
@@ -58,35 +65,58 @@ def run(
         nvda_mcp_url=nvda_mcp_url,
         max_steps=max_steps,
         trajectory_path=out,
+        log_level=log_level,
+        log_file_template=log_file,
     )
     result = asyncio.run(_run(config))
     print("Verdict:", result["verdict"])
 
 
 async def _run(config: RunConfig):
-    local_tools = [make_verdict_tool(), make_barrier_tool()]
+    logger = observability.configure(config.log_level, config.log_file_template)
+    observability.info(
+        "run.started",
+        url=config.task["url"],
+        goal=config.task["goal"],
+        model=config.model,
+        max_steps=config.max_steps,
+        log_file=str(logger.log_file_path) if logger.log_file_path else None,
+    )
+    try:
+        local_tools = [make_verdict_tool(), make_barrier_tool()]
 
-    # One persistent NVDA session performs setup and supplies every agent tool.
-    async with Client(config.nvda_mcp_url) as nvda_session:
-        mcp_tools = await register_mcp_tools(nvda_session)
-        tools = [*local_tools, *mcp_tools]
+        # One persistent NVDA session performs setup and supplies every agent tool.
+        async with Client(config.nvda_mcp_url) as nvda_session:
+            mcp_tools = await register_mcp_tools(nvda_session)
+            tools = [*local_tools, *mcp_tools]
 
-        llm = OpenaiLlmClient(
-            config.openai_base_url,
-            config.openai_api_key,
-            tools,
-            _additional_headers_for(config.openai_base_url),
-        )
-        navigator = McpNvdaNavigator(nvda_session)
+            llm = OpenaiLlmClient(
+                config.openai_base_url,
+                config.openai_api_key,
+                tools,
+                _additional_headers_for(config.openai_base_url),
+            )
+            navigator = McpNvdaNavigator(nvda_session)
 
-        return await AgentRunner(
-            llm,
-            navigator,
-            config.task,
-            config.model,
-            config.max_steps,
-            config.trajectory_path,
-        ).run()
+            result = await AgentRunner(
+                llm,
+                navigator,
+                config.task,
+                config.model,
+                config.max_steps,
+                config.trajectory_path,
+            ).run()
+            observability.info(
+                "run.finished",
+                status=str(result["verdict"]["status"]),
+                barrier_count=len(result["verdict"]["barriers"]),
+            )
+            return result
+    except Exception as exc:
+        observability.error("run.failed", error=repr(exc))
+        raise
+    finally:
+        observability.close()
 
 
 def main():

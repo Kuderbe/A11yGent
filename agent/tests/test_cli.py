@@ -13,6 +13,7 @@ import os
 
 from a11y_gent import main as main_module
 from a11y_gent.config import build_task
+from a11y_gent.observability import LogLevel
 from a11y_gent.model.verdict import VerdictStatus
 from typer.testing import CliRunner
 
@@ -79,6 +80,8 @@ def test_cli_builds_config_from_options():
     assert config.openai_api_key == "key"
     assert config.model == "gpt-5-mini"
     assert config.max_steps == 30
+    assert config.log_level is LogLevel.INFO
+    assert config.log_file_template is None
 
 
 def test_cli_does_not_require_browser_mcp_options():
@@ -111,10 +114,14 @@ def test_cli_options_override_defaults():
             "--goal", "g",
             "--max-steps", "5",
             "--out", "t.jsonl",
+            "--log-level", "debug",
+            "--log-file", "logs/run-<TIMESTAMP>-<RUN_ID>.jsonl",
         ]
     )
     assert config.max_steps == 5
     assert config.trajectory_path == "t.jsonl"
+    assert config.log_level is LogLevel.DEBUG
+    assert config.log_file_template == "logs/run-<TIMESTAMP>-<RUN_ID>.jsonl"
 
 
 

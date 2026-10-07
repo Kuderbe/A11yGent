@@ -20,6 +20,7 @@ import json
 from typing import Any, Awaitable, Callable
 
 from a11y_gent.model.tool import Tool
+from a11y_gent import observability
 
 
 # JSON-schema primitive -> Python annotation used for the synthesised signature.
@@ -82,14 +83,25 @@ def _make_tool_function(
 
     async def tool_function(**kwargs: Any) -> str:
         arguments = _coerce_arguments(kwargs, input_schema)
+        observability.verbose("mcp.call", tool=name, arguments=arguments)
+        observability.debug("mcp.call", tool=name, arguments=arguments)
         result = await session.call_tool(name, arguments)
-        return _flatten_result(result)
+        flattened = _flatten_result(result)
+        observability.verbose("mcp.result", tool=name, result=_truncate(flattened))
+        observability.debug("mcp.result", tool=name, result=flattened)
+        return flattened
 
     # Make the synthesised signature visible to inspect.signature so the LLM
     # client emits the correct JSON schema for this tool.
     tool_function.__signature__ = _signature_from_schema(input_schema)  # type: ignore[attr-defined]
     tool_function.__name__ = name
     return tool_function
+
+
+def _truncate(value: str, limit: int = 2000) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}… truncated ({len(value)} characters total)"
 
 
 def _signature_from_schema(input_schema: dict[str, Any]) -> inspect.Signature:

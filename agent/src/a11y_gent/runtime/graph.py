@@ -7,6 +7,7 @@ state, so this module holds no run configuration of its own.
 """
 
 from a11y_gent.model.graph_state import GraphState
+from a11y_gent import observability
 from a11y_gent.runtime.termination import should_continue
 from langgraph.graph import StateGraph, START, END
 
@@ -34,8 +35,22 @@ def build_agent_graph():
 
 async def think_node(state: GraphState):
     """Reasoning-only turn: infer without tools so no action is taken."""
+    observability.verbose("node.started", node="think", step=state["step_count"] + 1)
+    observability.debug("node.started", node="think", step=state["step_count"] + 1)
     response = await state["llm"].infer(
         state["discovery_context"], state["model"], use_tools=False
+    )
+    observability.verbose(
+        "node.completed",
+        node="think",
+        step=state["step_count"] + 1,
+        thinking=response["message"]["content"],
+    )
+    observability.debug(
+        "node.completed",
+        node="think",
+        step=state["step_count"] + 1,
+        thinking=response["message"]["content"],
     )
 
     return {
@@ -49,8 +64,28 @@ async def think_node(state: GraphState):
 
 async def act_node(state: GraphState):
     """Action turn: infer with tools; the model issues the next tool call."""
+    observability.verbose("node.started", node="act", step=state["step_count"])
+    observability.debug("node.started", node="act", step=state["step_count"])
     response = await state["llm"].infer(
         state["discovery_context"], state["model"], use_tools=True
+    )
+    observability.verbose(
+        "node.completed",
+        node="act",
+        step=state["step_count"],
+        tool_calls=[
+            {"tool": call["tool"]["name"], "arguments": call["arguments"]}
+            for call in response.get("tool_calls", [])
+        ],
+    )
+    observability.debug(
+        "node.completed",
+        node="act",
+        step=state["step_count"],
+        tool_calls=[
+            {"tool": call["tool"]["name"], "arguments": call["arguments"]}
+            for call in response.get("tool_calls", [])
+        ],
     )
 
     return {
@@ -63,10 +98,22 @@ async def act_node(state: GraphState):
 
 
 async def execute_tools_node(state: GraphState):
+    observability.verbose(
+        "node.started",
+        node="observe",
+        tool_call_count=len(state["pending_tool_calls"]),
+    )
+    observability.debug(
+        "node.started",
+        node="observe",
+        tool_call_count=len(state["pending_tool_calls"]),
+    )
     tool_messages = [
         await state["llm"].execute_tool_call(tool_call)
         for tool_call in state["pending_tool_calls"]
     ]
+    observability.verbose("node.completed", node="observe", result_count=len(tool_messages))
+    observability.debug("node.completed", node="observe", result_count=len(tool_messages))
 
     return {
         "discovery_context": [

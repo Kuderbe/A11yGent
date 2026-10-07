@@ -6,10 +6,13 @@ from a11y_gent.model.tool_call import ToolCall
 from collections.abc import Callable
 import inspect
 import json
+import time
 from openai import AsyncOpenAI
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from openai.types.chat.chat_completion_tool_union_param import ChatCompletionToolUnionParam
 from typing import Any, cast, get_args, get_origin
+
+from a11y_gent import observability
 
 
 class OpenaiLlmClient(LlmClient):
@@ -43,17 +46,51 @@ class OpenaiLlmClient(LlmClient):
 
         # Suppress tool calls for the reasoning-only step; tools stay advertised.
         tool_choice = "auto" if use_tools else "none"
+        node = "act" if use_tools else "think"
+        observability.debug(
+            "llm.request",
+            node=node,
+            model=model,
+            tool_choice=tool_choice,
+            messages=messages,
+            tools=tools,
+        )
 
+        started = time.perf_counter()
         res = await self._client.chat.completions.create(
             model=model,
             messages=messages,
             tools=tools,
             tool_choice=tool_choice,
         )
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
 
         choice = res.choices[0]
         response_message = choice.message
         content = response_message.content or ""
+        raw_tool_calls = [
+            {
+                "id": tool_call.id,
+                "name": tool_call.function.name,
+                "arguments_raw": tool_call.function.arguments,
+            }
+            for tool_call in response_message.tool_calls or []
+        ]
+        observability.verbose(
+            "llm.response",
+            node=node,
+            content=content,
+            tool_calls=raw_tool_calls,
+            elapsed_ms=elapsed_ms,
+        )
+        observability.debug(
+            "llm.response",
+            node=node,
+            content=content,
+            tool_calls=raw_tool_calls,
+            finish_reason=getattr(choice, "finish_reason", None),
+            elapsed_ms=elapsed_ms,
+        )
 
         message: Message = {
                 "origin": MessageOrigin.ASSISTANT,
@@ -104,20 +141,37 @@ class OpenaiLlmClient(LlmClient):
 
 
     async def execute_tool_call(self, tool_call: ToolCall) -> Message:
+        tool_name = tool_call["tool"]["name"]
+        observability.verbose(
+            "tool.call", tool=tool_name, call_id=tool_call["id"], arguments=tool_call["arguments"]
+        )
+        observability.debug(
+            "tool.call", tool=tool_name, call_id=tool_call["id"], arguments=tool_call["arguments"]
+        )
         result = tool_call["tool"]["tool_function"](**tool_call["arguments"])
         if inspect.isawaitable(result):
             result = await result
 
+        content = str(result)
+        observability.verbose("tool.result", tool=tool_name, call_id=tool_call["id"], result=content)
+        observability.debug("tool.result", tool=tool_name, call_id=tool_call["id"], result=content)
+        if tool_name == "report_barrier":
+            observability.info("barrier.reported", **tool_call["arguments"])
+        if tool_name == "report_verdict":
+            observability.info("verdict.reported", **tool_call["arguments"])
         return {
             "origin": MessageOrigin.TOOL,
-            "content": str(result),
-            "name": tool_call["tool"]["name"],
+            "content": content,
+            "name": tool_name,
             "reference_id": tool_call["id"],
         }
 
 
     def _convert_tool_call(self, tool_call_id: str, tool_name: str, arguments: str) -> ToolCall:
         tool = self._get_tool(tool_name)
+        observability.debug(
+            "tool.arguments_raw", tool=tool_name, call_id=tool_call_id, arguments_raw=arguments
+        )
 
         return {
             "id": tool_call_id,
