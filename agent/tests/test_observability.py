@@ -18,12 +18,12 @@ def test_info_omits_verbose_and_debug_events():
     logger = RunLogger(LogLevel.INFO, stderr=stderr)
 
     logger.info("run.started")
-    logger.verbose("node.started")
+    logger.verbose("phase.started")
     logger.debug("llm.request")
 
     output = stderr.getvalue()
     assert "run.started" in output
-    assert "node.started" not in output
+    assert "phase.started" not in output
     assert "llm.request" not in output
 
 
@@ -31,10 +31,10 @@ def test_verbose_writes_human_readable_thinking():
     stderr = io.StringIO()
     logger = RunLogger(LogLevel.VERBOSE, stderr=stderr)
 
-    logger.verbose("node.completed", thinking="inspect → button")
+    logger.verbose("phase.completed", thinking="inspect → button")
 
     output = stderr.getvalue()
-    assert "node.completed" in output
+    assert "phase.completed" in output
     assert "inspect \\u2192 button" in output
 
 

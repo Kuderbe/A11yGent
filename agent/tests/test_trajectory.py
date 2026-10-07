@@ -1,7 +1,7 @@
 """Tests for the trajectory serialiser (a11y_gent.trajectory.recorder).
 
 Offline, no NVDA/network. Verify that a message history is classified into
-think / action / observation roles and serialised to JSON Lines.
+context / think / act / observe phases and serialised to JSON Lines.
 
 Run standalone with the stdlib:
 
@@ -13,7 +13,7 @@ import os
 import tempfile
 
 from a11y_gent.model.message import MessageOrigin
-from a11y_gent.trajectory.recorder import classify, to_records, write_jsonl
+from a11y_gent.trajectory.recorder import classify_phase, to_records, write_jsonl
 
 
 def _history():
@@ -44,25 +44,27 @@ def _history():
     ]
 
 
-def test_classify_roles():
+def test_classify_phases():
     history = _history()
-    assert classify(history[0]) == "system"
-    assert classify(history[1]) == "user"
-    assert classify(history[2]) == "think"
-    assert classify(history[3]) == "action"
-    assert classify(history[4]) == "observation"
+    assert classify_phase(history[0]) == "context"
+    assert classify_phase(history[1]) == "context"
+    assert classify_phase(history[2]) == "think"
+    assert classify_phase(history[3]) == "act"
+    assert classify_phase(history[4]) == "observe"
 
 
 def test_to_records_captures_tool_calls_and_reference():
     records = to_records(_history())
-    action = records[3]
-    assert action["role"] == "action"
-    assert action["tool_calls"][0]["tool"] == "send_keys"
-    assert action["tool_calls"][0]["arguments"] == {"gestures": ["b"]}
+    act = records[3]
+    assert act["phase"] == "act"
+    assert act["message_role"] == "assistant"
+    assert act["tool_calls"][0]["tool"] == "send_keys"
+    assert act["tool_calls"][0]["arguments"] == {"gestures": ["b"]}
 
-    observation = records[4]
-    assert observation["role"] == "observation"
-    assert observation["reference_id"] == "call_1"
+    observe = records[4]
+    assert observe["phase"] == "observe"
+    assert observe["message_role"] == "tool"
+    assert observe["reference_id"] == "call_1"
 
 
 def test_write_jsonl_roundtrip():
@@ -73,13 +75,21 @@ def test_write_jsonl_roundtrip():
         with open(path, encoding="utf-8") as handle:
             lines = [json.loads(line) for line in handle if line.strip()]
         assert len(lines) == 5
-        assert [line["role"] for line in lines] == [
+        assert [line["phase"] for line in lines] == [
+            "context",
+            "context",
+            "think",
+            "act",
+            "observe",
+        ]
+        assert [line["message_role"] for line in lines] == [
             "system",
             "user",
-            "think",
-            "action",
-            "observation",
+            "assistant",
+            "assistant",
+            "tool",
         ]
+        assert all("role" not in line and "origin" not in line for line in lines)
     finally:
         os.remove(path)
 

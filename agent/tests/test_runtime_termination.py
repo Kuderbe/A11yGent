@@ -69,9 +69,9 @@ def test_should_continue_done_on_step_cap():
     assert should_continue(state) == "done"
 
 
-def test_should_continue_tools_otherwise():
+def test_should_continue_observe_otherwise():
     state = _state([_assistant_calling("report_barrier")], step_count=3, max_steps=30)
-    assert should_continue(state) == "tools"
+    assert should_continue(state) == "observe"
 
 
 def _run_all():

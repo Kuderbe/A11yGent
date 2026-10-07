@@ -132,8 +132,9 @@ def test_runner_writes_trajectory():
 
     _, records, _ = _run(llm)
 
-    assert records[0]["role"] == "system"
-    assert any(r["role"] == "action" for r in records)
+    assert records[0]["phase"] == "context"
+    assert records[0]["message_role"] == "system"
+    assert any(r["phase"] == "act" for r in records)
 
 
 def test_runner_normalises_step_cap_to_failed_verdict():

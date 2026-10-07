@@ -28,4 +28,4 @@ def should_continue(state: GraphState) -> str:
         return "done"
 
     # Run any tool calls (including report_barrier) and loop back to reasoning.
-    return "tools"
+    return "observe"

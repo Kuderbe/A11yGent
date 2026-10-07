@@ -46,10 +46,10 @@ class OpenaiLlmClient(LlmClient):
 
         # Suppress tool calls for the reasoning-only step; tools stay advertised.
         tool_choice = "auto" if use_tools else "none"
-        node = "act" if use_tools else "think"
+        phase = "act" if use_tools else "think"
         observability.debug(
             "llm.request",
-            node=node,
+            phase=phase,
             model=model,
             tool_choice=tool_choice,
             messages=messages,
@@ -78,14 +78,14 @@ class OpenaiLlmClient(LlmClient):
         ]
         observability.verbose(
             "llm.response",
-            node=node,
+            phase=phase,
             content=content,
             tool_calls=raw_tool_calls,
             elapsed_ms=elapsed_ms,
         )
         observability.debug(
             "llm.response",
-            node=node,
+            phase=phase,
             content=content,
             tool_calls=raw_tool_calls,
             finish_reason=getattr(choice, "finish_reason", None),

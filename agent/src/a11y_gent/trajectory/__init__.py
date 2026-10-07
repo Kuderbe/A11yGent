@@ -3,6 +3,6 @@
 See :mod:`a11y_gent.trajectory.recorder`.
 """
 
-from a11y_gent.trajectory.recorder import classify, to_records, write_jsonl
+from a11y_gent.trajectory.recorder import classify_phase, to_records, write_jsonl
 
-__all__ = ["classify", "to_records", "write_jsonl"]
+__all__ = ["classify_phase", "to_records", "write_jsonl"]

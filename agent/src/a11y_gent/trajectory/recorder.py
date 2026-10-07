@@ -1,8 +1,8 @@
 """Serialise the agent trajectory to JSON Lines.
 
-The message history is the trajectory: this module classifies each message as a
-reasoning ("think"), action ("act"), or observation turn and writes the run to
-a JSON Lines file. No separate per-step model is maintained.
+The message history is the trajectory: this module projects each message onto a
+run phase and its standard chat role before writing JSON Lines. No separate
+per-step model is maintained.
 """
 
 from __future__ import annotations
@@ -13,20 +13,20 @@ from typing import Iterable
 from a11y_gent.model.message import Message, MessageOrigin
 
 
-def classify(message: Message) -> str:
-    """Return the trajectory role of ``message``.
+def classify_phase(message: Message) -> str:
+    """Return the run phase of ``message``.
 
-    - ``"action"``      - an assistant message that issued tool call(s).
-    - ``"think"``       - an assistant message with no tool calls (reasoning).
-    - ``"observation"`` - a tool-result message.
-    - ``"system"`` / ``"user"`` - framing/task messages.
+    - ``"act"``     - an assistant message that issued tool call(s).
+    - ``"think"``   - an assistant message with no tool calls (reasoning).
+    - ``"observe"`` - a tool-result message.
+    - ``"context"`` - system or user framing/task messages.
     """
     origin = message["origin"]
     if origin == MessageOrigin.ASSISTANT:
-        return "action" if message.get("tool_calls") else "think"
+        return "act" if message.get("tool_calls") else "think"
     if origin == MessageOrigin.TOOL:
-        return "observation"
-    return str(origin)
+        return "observe"
+    return "context"
 
 
 def to_records(history: Iterable[Message]) -> list[dict]:
@@ -35,8 +35,8 @@ def to_records(history: Iterable[Message]) -> list[dict]:
     for index, message in enumerate(history):
         record: dict = {
             "index": index,
-            "role": classify(message),
-            "origin": str(message["origin"]),
+            "phase": classify_phase(message),
+            "message_role": str(message["origin"]),
             "name": message.get("name", ""),
             "content": message.get("content", ""),
         }
