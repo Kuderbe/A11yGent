@@ -71,6 +71,11 @@ class _ScriptedLlm(LlmClient):
         }
 
 
+class _FailingToolLlm(_ScriptedLlm):
+    async def execute_tool_call(self, tool_call):
+        raise RuntimeError("simulated crash inside execute_tools_node")
+
+
 _TASK = {"url": "http://example.test/barrier.html", "goal": "Do the thing."}
 
 
@@ -135,6 +140,27 @@ def test_runner_writes_trajectory():
     assert records[0]["phase"] == "context"
     assert records[0]["message_role"] == "system"
     assert any(r["phase"] == "act" for r in records)
+
+
+def test_runner_preserves_trajectory_when_a_tool_fails():
+    llm = _FailingToolLlm(
+        [[_tool_call(_BARRIER_TOOL, "b1", {"description": "d", "evidence": "e"})]]
+    )
+    navigator = _FakeNavigator()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "trajectory.jsonl"
+        try:
+            asyncio.run(AgentRunner(llm, navigator, _TASK, "m", 30, str(path)).run())
+        except RuntimeError as error:
+            assert str(error) == "simulated crash inside execute_tools_node"
+        else:
+            raise AssertionError("Expected the simulated tool failure")
+
+        records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+    assert records
+    assert records[-1]["phase"] == "act"
+    assert records[-1]["tool_calls"][0]["id"] == "b1"
 
 
 def test_runner_normalises_step_cap_to_failed_verdict():

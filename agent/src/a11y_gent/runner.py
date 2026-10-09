@@ -9,6 +9,8 @@ one within the step cap, the runner records a FAILED verdict for a task it could
 not solve in that many steps.
 """
 
+import json
+
 from a11y_gent.adaptor.nvda_navigator import TaskNavigator
 from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.model.message import MessageOrigin
@@ -19,7 +21,7 @@ from a11y_gent import observability
 from a11y_gent.prompts import build_system_prompt, few_shot_exemplars
 from a11y_gent.runtime import build_agent_graph
 from a11y_gent.tooling.extract import extract_barriers, extract_verdict
-from a11y_gent.trajectory import write_jsonl
+from a11y_gent.trajectory import to_records
 
 
 class AgentRunner:
@@ -47,20 +49,29 @@ class AgentRunner:
 
         graph = build_agent_graph()
 
-        res = await graph.ainvoke(
-            {
-                "llm": self._llm,
-                "task": self._task,
-                "model": self._model,
-                "max_steps": self._max_steps,
-                "discovery_context": self._seed_context(),
-                "pending_tool_calls": [],
-                "step_count": 0,
-            }
-        )
+        history = []
+        written = 0
+        with open(self._trajectory_path, "w", encoding="utf-8") as handle:
+            async for state in graph.astream(
+                {
+                    "llm": self._llm,
+                    "task": self._task,
+                    "model": self._model,
+                    "max_steps": self._max_steps,
+                    "discovery_context": self._seed_context(),
+                    "pending_tool_calls": [],
+                    "step_count": 0,
+                },
+                stream_mode="values",
+            ):
+                records = to_records(state["discovery_context"])
+                for record in records[written:]:
+                    handle.write(json.dumps(record, ensure_ascii=False))
+                    handle.write("\n")
+                written = len(records)
+                handle.flush()
+                history = state["discovery_context"]
 
-        history = res["discovery_context"]
-        write_jsonl(history, self._trajectory_path)
         observability.info(
             "trajectory.written",
             path=self._trajectory_path,
