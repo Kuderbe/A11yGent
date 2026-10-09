@@ -80,7 +80,7 @@ def test_cli_builds_config_from_options():
     assert config.openai_base_url == "http://base"
     assert config.openai_api_key == "key"
     assert config.model == "gpt-5-mini"
-    assert config.max_steps == 30
+    assert config.max_steps == 200
     assert config.log_level is LogLevel.INFO
     assert config.log_file_template is None
 

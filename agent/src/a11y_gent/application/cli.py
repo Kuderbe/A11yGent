@@ -34,7 +34,7 @@ def build_app(program: AgentProgram) -> typer.Typer:
             envvar="A11Y_GENT_MCP_URL",
             help="URL of the NVDA MCP bridge (its tools drive the agent).",
         ),
-        max_steps: int = typer.Option(30, help="Safety net: stop after this many reasoning steps."),
+        max_steps: int = typer.Option(200, help="Safety net: stop after this many reasoning steps."),
         out: str = typer.Option("trajectory.jsonl", help="Where to write the trajectory JSONL."),
         log_level: LogLevel = typer.Option(LogLevel.INFO, help="Log detail: info, verbose, or debug."),
         log_file: str | None = typer.Option(
