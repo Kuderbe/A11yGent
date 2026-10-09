@@ -11,7 +11,7 @@ Run standalone with the stdlib:
 import asyncio
 
 from a11y_gent.model.message import MessageOrigin
-from a11y_gent.runtime.graph import think_node
+from a11y_gent.profiles.baseline.graph import think_node
 from a11y_gent.runtime.reasoning import (
     ReasoningToolCallSyntaxError,
     assert_plain_text_reasoning,

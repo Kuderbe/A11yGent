@@ -6,12 +6,11 @@ from a11y_gent.model.task import Task
 from a11y_gent.model.tool_call import ToolCall
 
 
-class GraphState(TypedDict):
+class BaselineState(TypedDict):
     llm: LlmClient
     task: Task
     model: str
     max_steps: int
-
     discovery_context: list[Message]
     pending_tool_calls: list[ToolCall]
     step_count: int

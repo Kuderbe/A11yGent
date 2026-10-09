@@ -11,6 +11,7 @@ Run standalone with the stdlib:
 
 import os
 
+from a11y_gent.application import cli as cli_module
 from a11y_gent import main as main_module
 from a11y_gent.config import build_task
 from a11y_gent.observability import LogLevel
@@ -33,21 +34,21 @@ _FAKE_RESULT = {
 
 
 def _invoke(args, env=None):
-    """Run the CLI with ``_run`` stubbed; return (result, captured_config)."""
+    """Run the CLI with shared execution stubbed; return its configuration."""
     captured = {}
 
-    async def _fake_run(config):
+    async def _fake_execute(config, program):
         captured["config"] = config
         return _FAKE_RESULT
 
-    original = main_module._run
-    main_module._run = _fake_run
+    original = cli_module.execute
+    cli_module.execute = _fake_execute
     try:
         result = _runner.invoke(
             main_module.app, args, env={**_ENV, **(env or {})}
         )
     finally:
-        main_module._run = original
+        cli_module.execute = original
     return result, captured.get("config")
 
 

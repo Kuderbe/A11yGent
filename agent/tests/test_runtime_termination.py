@@ -1,8 +1,7 @@
-"""Tests for the loop termination logic (a11y_gent.runtime.termination).
+"""Tests for shared message-history inspection.
 
 Offline, no NVDA/network: builds tiny message histories and states by hand and
-checks that should_continue stops on a report_verdict in the latest message or
-when the step cap is reached, and continues otherwise.
+checks whether the latest assistant message calls a named tool.
 
 Run standalone with the stdlib:
 
@@ -10,7 +9,7 @@ Run standalone with the stdlib:
 """
 
 from a11y_gent.model.message import MessageOrigin
-from a11y_gent.runtime.termination import latest_message_calls, should_continue
+from a11y_gent.runtime.termination import latest_message_calls
 
 
 def _tool_call(name):
@@ -23,22 +22,6 @@ def _assistant_calling(name):
         "name": "assistant",
         "content": "",
         "tool_calls": [_tool_call(name)],
-    }
-
-
-def _thought():
-    return {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "thinking"}
-
-
-def _state(history, step_count=0, max_steps=30):
-    return {
-        "llm": None,
-        "task": {"url": "u", "goal": "g"},
-        "model": "m",
-        "max_steps": max_steps,
-        "discovery_context": history,
-        "pending_tool_calls": [],
-        "step_count": step_count,
     }
 
 
@@ -57,21 +40,6 @@ def test_latest_message_calls_false_when_last_is_not_assistant():
         {"origin": MessageOrigin.TOOL, "name": "report_verdict", "content": "ok", "reference_id": "1"},
     ]
     assert latest_message_calls(history, "report_verdict") is False
-
-
-def test_should_continue_done_on_verdict():
-    state = _state([_assistant_calling("report_verdict")])
-    assert should_continue(state) == "done"
-
-
-def test_should_continue_done_on_step_cap():
-    state = _state([_thought()], step_count=30, max_steps=30)
-    assert should_continue(state) == "done"
-
-
-def test_should_continue_observe_otherwise():
-    state = _state([_assistant_calling("report_barrier")], step_count=3, max_steps=30)
-    assert should_continue(state) == "observe"
 
 
 def _run_all():

@@ -1,0 +1,1 @@
+"""Shared setup and execution support for agent programs."""

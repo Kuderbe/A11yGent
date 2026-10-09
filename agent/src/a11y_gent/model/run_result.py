@@ -1,10 +1,9 @@
 """The outcome of a single agent run.
 
 Bundles the task that was attempted, the verdict reached, and the path of the
-written trajectory. Returned by :class:`a11y_gent.runner.AgentRunner` so callers
-get one structured result instead of reading it back off stdout. A run always
-has a verdict: if the agent never reports one within the step cap, the runner
-records a FAILED verdict for a task it could not solve in that many steps.
+written trajectory. Returned by an agent program so callers get one structured
+result instead of reading it back off stdout. A program defines how it handles a
+missing verdict.
 """
 
 from typing import TypedDict

@@ -1,9 +1,8 @@
 """Run configuration: every parameter one agent run needs, in one place.
 
 :class:`RunConfig` is an immutable bundle the CLI builds once and hands to
-:class:`a11y_gent.runner.AgentRunner`. Keeping it separate from the CLI means
-tests can construct a config directly, without environment variables or
-argument parsing.
+the common application layer. Keeping it separate from the CLI means tests can
+construct a config directly, without environment variables or argument parsing.
 """
 
 from dataclasses import dataclass

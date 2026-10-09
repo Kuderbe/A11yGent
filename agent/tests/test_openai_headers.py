@@ -7,7 +7,7 @@ Run standalone with the stdlib:
 
 from uuid import UUID
 
-from a11y_gent import main as main_module
+from a11y_gent.main_support import additional_headers_for
 from a11y_gent.adaptor import openai_llm_client as client_module
 from a11y_gent.adaptor.openai_llm_client import OpenaiLlmClient
 
@@ -47,14 +47,14 @@ def test_client_uses_empty_headers_by_default():
 
 
 def test_opencode_root_domain_gets_a_session_header():
-    headers = main_module._additional_headers_for("https://opencode.ai/v1")
+    headers = additional_headers_for("https://opencode.ai/v1")
 
     assert set(headers) == {"x-opencode-session"}
     UUID(headers["x-opencode-session"])
 
 
 def test_opencode_subdomain_gets_a_session_header():
-    headers = main_module._additional_headers_for("https://api.opencode.ai/v1")
+    headers = additional_headers_for("https://api.opencode.ai/v1")
 
     assert set(headers) == {"x-opencode-session"}
     UUID(headers["x-opencode-session"])
@@ -67,12 +67,12 @@ def test_non_opencode_domains_get_empty_additional_headers():
         "https://example.org/opencode.ai/v1",
         "http://localhost:6655/v1",
     ):
-        assert main_module._additional_headers_for(base_url) == {}
+        assert additional_headers_for(base_url) == {}
 
 
 def test_each_opencode_session_header_is_unique():
-    first = main_module._additional_headers_for("https://opencode.ai/v1")
-    second = main_module._additional_headers_for("https://opencode.ai/v1")
+    first = additional_headers_for("https://opencode.ai/v1")
+    second = additional_headers_for("https://opencode.ai/v1")
 
     assert first["x-opencode-session"] != second["x-opencode-session"]
 

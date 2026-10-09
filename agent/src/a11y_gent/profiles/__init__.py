@@ -1,0 +1,1 @@
+"""Independently structured A11yGent agent variants."""

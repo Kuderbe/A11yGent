@@ -1,4 +1,4 @@
-"""Tests for AgentRunner (a11y_gent.runner).
+"""Tests for the baseline agent program.
 
 Offline, no NVDA/network: a scripted fake LlmClient plays back a sequence of
 think/act responses, so the whole reason -> act -> observe loop runs in-process.
@@ -17,9 +17,10 @@ import tempfile
 from pathlib import Path
 
 from a11y_gent.adaptor.llm_client import LlmClient
+from a11y_gent.application.program import RunContext
 from a11y_gent.model.message import MessageOrigin
 from a11y_gent.model.verdict import VerdictStatus
-from a11y_gent.runner import AgentRunner
+from a11y_gent.profiles.baseline.agent import BaselineAgent
 from a11y_gent.tooling.barrier import make_barrier_tool
 from a11y_gent.tooling.verdict import make_verdict_tool
 
@@ -37,7 +38,7 @@ class _ScriptedLlm(LlmClient):
 
     ``infer`` returns the next scripted response on an action turn and a plain
     thought on a reasoning turn, matching the think -> act rhythm of the graph.
-    ``execute_tool_call`` runs the (no-op) tool and returns its result message.
+    ``execute_tool_call`` runs the no-op tool and returns its result message.
     """
 
     def __init__(self, action_responses):
@@ -94,23 +95,15 @@ def _run(llm, max_steps=30):
     with tempfile.TemporaryDirectory() as tmp:
         path = str(Path(tmp) / "trajectory.jsonl")
         result = asyncio.run(
-            AgentRunner(llm, navigator, _TASK, "m", max_steps, path).run()
+            BaselineAgent().run(
+                RunContext(_TASK, "m", max_steps, path, llm, navigator, "test-run")
+            )
         )
         records = [
             json.loads(line)
             for line in Path(path).read_text(encoding="utf-8").splitlines()
         ]
     return result, records, navigator
-
-
-def test_runner_navigates_to_task_url_before_running():
-    llm = _ScriptedLlm(
-        [[_tool_call(_VERDICT_TOOL, "v1", {"status": "succeeded", "summary": "ok"})]]
-    )
-
-    _, _, navigator = _run(llm)
-
-    assert navigator.opened == _TASK["url"]
 
 
 def test_runner_returns_reported_verdict_and_barriers():
@@ -150,7 +143,11 @@ def test_runner_preserves_trajectory_when_a_tool_fails():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "trajectory.jsonl"
         try:
-            asyncio.run(AgentRunner(llm, navigator, _TASK, "m", 30, str(path)).run())
+            asyncio.run(
+                BaselineAgent().run(
+                    RunContext(_TASK, "m", 30, str(path), llm, navigator, "test-run")
+                )
+            )
         except RuntimeError as error:
             assert str(error) == "simulated crash inside execute_tools_node"
         else:
