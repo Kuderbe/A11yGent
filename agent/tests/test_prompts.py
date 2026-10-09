@@ -21,6 +21,8 @@ def test_system_prompt_embeds_task():
     assert "Sign up for an account." in prompt
     assert "report_verdict" in prompt
     assert "report_barrier" in prompt
+    assert "Never imitate or serialize a tool call" in prompt
+    assert "following action turn" in prompt
     # The three verdict statuses must be described to the model.
     assert "succeeded_with_avoidable_difficulty" in prompt
     # No success hint given -> the hint block is absent.

@@ -8,6 +8,7 @@ so this module holds no run configuration of its own.
 
 from a11y_gent.model.graph_state import GraphState
 from a11y_gent import observability
+from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
 from a11y_gent.runtime.termination import should_continue
 from langgraph.graph import StateGraph, START, END
 
@@ -40,6 +41,7 @@ async def think_node(state: GraphState):
     response = await state["llm"].infer(
         state["discovery_context"], state["model"], use_tools=False
     )
+    assert_plain_text_reasoning(response["message"]["content"])
     observability.verbose(
         "phase.completed",
         phase="think",
