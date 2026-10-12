@@ -116,17 +116,17 @@ def test_verbose_writes_human_readable_thinking():
 
     output = stderr.getvalue()
     assert "phase.completed" in output
-    assert "inspect \\u2192 button" in output
+    assert "inspect → button" in output
 
 
-def test_debug_writes_parseable_ascii_json():
+def test_debug_writes_parseable_utf8_json():
     stderr = io.StringIO()
     logger = RunLogger(LogLevel.DEBUG, stderr=stderr)
 
     logger.debug("llm.response", content="a→ä")
 
     line = stderr.getvalue()
-    assert line.isascii()
+    assert "a→ä" in line
     record = json.loads(line)
     assert record["event"] == "llm.response"
     assert record["content"] == "a→ä"

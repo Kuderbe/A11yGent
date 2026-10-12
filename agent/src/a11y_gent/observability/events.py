@@ -144,7 +144,7 @@ class RunLogger:
 
     def _format(self, record: dict[str, Any]) -> str:
         if self.level is LogLevel.DEBUG:
-            return json.dumps(record, ensure_ascii=True, default=str, separators=(",", ":")) + "\n"
+            return json.dumps(record, ensure_ascii=False, default=str, separators=(",", ":")) + "\n"
         details = " ".join(
             f"{key}={self._human_value(value)}"
             for key, value in record.items()
@@ -202,7 +202,7 @@ class RunLogger:
 
     def _write_stderr(self, line: str) -> None:
         try:
-            self._stderr.write(line.encode("ascii", "backslashreplace").decode("ascii"))
+            self._stderr.write(line)
             self._stderr.flush()
         except (OSError, UnicodeError):
             pass
