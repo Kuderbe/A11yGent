@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -54,13 +55,13 @@ class RunLogger:
         self._transcript("Navigating to Application...\n")
 
     def reason(self, content: str) -> None:
-        self._transcript(f"Reason: {self._transcript_value(content)}\n")
+        self._transcript(f"Reasoning: {self._transcript_value(content)}\n")
 
     def act(self, tool: str, arguments: dict[str, Any]) -> None:
         self._transcript(f"Act: {self._format_action(tool, arguments)}\n")
 
-    def observe(self, content: str) -> None:
-        self._transcript(f"Observe: {self._transcript_value(content)}\n")
+    def observe(self, tool: str, content: str) -> None:
+        self._transcript(f"Observe: {tool}: {self._observation_value(content)}\n")
 
     def result(self, status: str, barriers: list[dict[str, Any]]) -> None:
         if self.level is not LogLevel.MINIMAL:
@@ -119,18 +120,16 @@ class RunLogger:
 
     @staticmethod
     def _transcript_value(value: str) -> str:
-        return value.replace("\n", " ").strip()
+        return RunLogger._clean_text(value.replace("\n", " "))
 
     @staticmethod
     def _format_action(tool: str, arguments: dict[str, Any]) -> str:
         if tool == "send_key" and set(arguments) == {"gesture"}:
-            return f"SendKeys: {arguments['gesture']}"
+            return f"send_key({RunLogger._clean_text(str(arguments['gesture']))})"
         if tool == "send_keys" and set(arguments).issubset({"gestures", "delay_ms"}):
             gestures = arguments.get("gestures", [])
-            return f"SendKeys: {', '.join(str(gesture) for gesture in gestures)}"
-        if tool == "type_text" and "text" in arguments:
-            return f"TypeText: {arguments['text']}"
-        return f"{tool}: {json.dumps(arguments, ensure_ascii=True, default=str, separators=(',', ':'))}"
+            return f"send_keys({' '.join(RunLogger._clean_text(str(gesture)) for gesture in gestures)})"
+        return tool
 
     def _is_enabled(self, severity: str) -> bool:
         if severity in ("warning", "error"):
@@ -157,8 +156,49 @@ class RunLogger:
     @staticmethod
     def _human_value(value: Any) -> str:
         if isinstance(value, str):
-            return value.replace("\n", "\\n")
-        return json.dumps(value, ensure_ascii=True, default=str, separators=(",", ":"))
+            return RunLogger._human_string(value)
+        if value is None or isinstance(value, (bool, int, float)):
+            return str(value).lower()
+        if isinstance(value, dict):
+            return ", ".join(
+                f"{RunLogger._clean_text(str(key))}={RunLogger._human_value(item)}"
+                for key, item in value.items()
+            )
+        if isinstance(value, (list, tuple, set)):
+            return ", ".join(RunLogger._human_value(item) for item in value)
+        return RunLogger._clean_text(str(value))
+
+    @staticmethod
+    def _human_string(value: str) -> str:
+        parsed = RunLogger._parse_json(value)
+        if parsed is not None:
+            return RunLogger._human_value(parsed)
+        return RunLogger._clean_text(value.replace("\n", "\\n"))
+
+    @staticmethod
+    def _observation_value(content: str) -> str:
+        parsed = RunLogger._parse_json(content)
+        if isinstance(parsed, dict):
+            entries = parsed.get("entries")
+            if isinstance(entries, list) and all(isinstance(entry, dict) for entry in entries):
+                texts = [entry.get("text") for entry in entries if isinstance(entry.get("text"), str)]
+                if texts:
+                    return " | ".join(RunLogger._clean_text(text) for text in texts)
+        return RunLogger._human_value(parsed) if parsed is not None else RunLogger._transcript_value(content)
+
+    @staticmethod
+    def _parse_json(value: str) -> Any | None:
+        stripped = value.strip()
+        if not stripped.startswith(("{", "[")):
+            return None
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+
+    @staticmethod
+    def _clean_text(value: str) -> str:
+        return re.sub(r"\s{2,}", " ", value.replace("\u200b", "").replace("\ufffc", "")).strip()
 
     def _write_stderr(self, line: str) -> None:
         try:
@@ -227,8 +267,8 @@ def act(tool: str, arguments: dict[str, Any]) -> None:
     _logger.act(tool, arguments)
 
 
-def observe(content: str) -> None:
-    _logger.observe(content)
+def observe(tool: str, content: str) -> None:
+    _logger.observe(tool, content)
 
 
 def result(status: str, barriers: list[dict[str, Any]]) -> None:

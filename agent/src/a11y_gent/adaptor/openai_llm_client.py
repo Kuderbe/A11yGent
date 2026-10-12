@@ -154,7 +154,7 @@ class OpenaiLlmClient(LlmClient):
 
         content = str(result)
         if tool_name not in {"report_barrier", "report_verdict"}:
-            observability.observe(content)
+            observability.observe(tool_name, content)
         observability.verbose("tool.result", tool=tool_name, call_id=tool_call["id"], result=content)
         observability.debug("tool.result", tool=tool_name, call_id=tool_call["id"], result=content)
         if tool_name == "report_barrier":
