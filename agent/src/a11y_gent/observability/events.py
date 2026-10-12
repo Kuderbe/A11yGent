@@ -12,6 +12,7 @@ from uuid import uuid4
 
 
 class LogLevel(StrEnum):
+    MINIMAL = "minimal"
     INFO = "info"
     VERBOSE = "verbose"
     DEBUG = "debug"
@@ -48,6 +49,28 @@ class RunLogger:
 
     def error(self, event: str, **fields: Any) -> None:
         self._emit("error", event, fields)
+
+    def navigating(self) -> None:
+        self._transcript("Navigating to Application...\n")
+
+    def reason(self, content: str) -> None:
+        self._transcript(f"Reason: {self._transcript_value(content)}\n")
+
+    def act(self, tool: str, arguments: dict[str, Any]) -> None:
+        self._transcript(f"Act: {self._format_action(tool, arguments)}\n")
+
+    def observe(self, content: str) -> None:
+        self._transcript(f"Observe: {self._transcript_value(content)}\n")
+
+    def result(self, status: str, barriers: list[dict[str, Any]]) -> None:
+        if self.level is not LogLevel.MINIMAL:
+            return
+        lines = [f"Result: {status.replace('_', ' ').upper()}\n", "Found barriers:\n"]
+        if barriers:
+            lines.extend(f"- {barrier['description']}\n" for barrier in barriers)
+        else:
+            lines.append("- None\n")
+        self._write_all("".join(lines))
 
     def close(self) -> None:
         if self._file is None:
@@ -90,6 +113,25 @@ class RunLogger:
         except (TypeError, ValueError, OSError, UnicodeError):
             self._write_stderr("[a11y-gent WARNING] log.event_unavailable\n")
 
+    def _transcript(self, line: str) -> None:
+        if self.level is LogLevel.MINIMAL:
+            self._write_all(line)
+
+    @staticmethod
+    def _transcript_value(value: str) -> str:
+        return value.replace("\n", " ").strip()
+
+    @staticmethod
+    def _format_action(tool: str, arguments: dict[str, Any]) -> str:
+        if tool == "send_key" and set(arguments) == {"gesture"}:
+            return f"SendKeys: {arguments['gesture']}"
+        if tool == "send_keys" and set(arguments).issubset({"gestures", "delay_ms"}):
+            gestures = arguments.get("gestures", [])
+            return f"SendKeys: {', '.join(str(gesture) for gesture in gestures)}"
+        if tool == "type_text" and "text" in arguments:
+            return f"TypeText: {arguments['text']}"
+        return f"{tool}: {json.dumps(arguments, ensure_ascii=True, default=str, separators=(',', ':'))}"
+
     def _is_enabled(self, severity: str) -> bool:
         if severity in ("warning", "error"):
             return True
@@ -97,6 +139,8 @@ class RunLogger:
             return severity in ("info", "debug")
         if self.level is LogLevel.VERBOSE:
             return severity in ("info", "verbose")
+        if self.level is LogLevel.MINIMAL:
+            return False
         return severity == "info"
 
     def _format(self, record: dict[str, Any]) -> str:
@@ -122,6 +166,10 @@ class RunLogger:
             self._stderr.flush()
         except (OSError, UnicodeError):
             pass
+
+    def _write_all(self, line: str) -> None:
+        self._write_stderr(line)
+        self._write_file(line)
 
     def _write_file(self, line: str) -> None:
         if self._file is None:
@@ -165,3 +213,23 @@ def warning(event: str, **fields: Any) -> None:
 
 def error(event: str, **fields: Any) -> None:
     _logger.error(event, **fields)
+
+
+def navigating() -> None:
+    _logger.navigating()
+
+
+def reason(content: str) -> None:
+    _logger.reason(content)
+
+
+def act(tool: str, arguments: dict[str, Any]) -> None:
+    _logger.act(tool, arguments)
+
+
+def observe(content: str) -> None:
+    _logger.observe(content)
+
+
+def result(status: str, barriers: list[dict[str, Any]]) -> None:
+    _logger.result(status, barriers)

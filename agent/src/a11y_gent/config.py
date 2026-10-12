@@ -20,7 +20,7 @@ class RunConfig:
     nvda_mcp_url: str
     max_steps: int
     trajectory_path: str
-    log_level: LogLevel = LogLevel.INFO
+    log_level: LogLevel = LogLevel.MINIMAL
     log_file_template: str | None = None
 
 

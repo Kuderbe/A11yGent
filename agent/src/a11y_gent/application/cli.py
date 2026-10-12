@@ -36,7 +36,10 @@ def build_app(program: AgentProgram) -> typer.Typer:
         ),
         max_steps: int = typer.Option(200, help="Safety net: stop after this many reasoning steps."),
         out: str = typer.Option("trajectory.jsonl", help="Where to write the trajectory JSONL."),
-        log_level: LogLevel = typer.Option(LogLevel.INFO, help="Log detail: info, verbose, or debug."),
+        log_level: LogLevel = typer.Option(
+            LogLevel.MINIMAL,
+            help="Log detail: minimal, info, verbose, or debug.",
+        ),
         log_file: str | None = typer.Option(
             None, help="Optional log-file template; supports <TIMESTAMP> and <RUN_ID>."
         ),

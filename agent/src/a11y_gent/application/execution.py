@@ -15,6 +15,7 @@ from mcp import Client
 
 async def execute(config: RunConfig, program: AgentProgram):
     logger = observability.configure(config.log_level, config.log_file_template)
+    observability.navigating()
     observability.info(
         "run.started",
         program_id=program.id,
@@ -49,6 +50,9 @@ async def execute(config: RunConfig, program: AgentProgram):
                 )
             )
             write_result(result, program, logger.run_id)
+            observability.result(
+                str(result["verdict"]["status"]), result["verdict"]["barriers"]
+            )
             observability.info(
                 "run.finished",
                 status=str(result["verdict"]["status"]),

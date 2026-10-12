@@ -27,6 +27,49 @@ def test_info_omits_verbose_and_debug_events():
     assert "llm.request" not in output
 
 
+def test_minimal_writes_a_concise_transcript():
+    stderr = io.StringIO()
+    logger = RunLogger(LogLevel.MINIMAL, stderr=stderr)
+
+    logger.navigating()
+    logger.reason("Find the form.\nThen inspect its fields.")
+    logger.act("send_key", {"gesture": "f"})
+    logger.observe("Heading level 1, Contact us")
+    logger.result(
+        "succeeded_with_avoidable_difficulty",
+        [{"description": "The email field has no accessible label."}],
+    )
+
+    assert stderr.getvalue() == (
+        "Navigating to Application...\n"
+        "Reason: Find the form. Then inspect its fields.\n"
+        "Act: SendKeys: f\n"
+        "Observe: Heading level 1, Contact us\n"
+        "Result: SUCCEEDED WITH AVOIDABLE DIFFICULTY\n"
+        "Found barriers:\n"
+        "- The email field has no accessible label.\n"
+    )
+
+
+def test_minimal_lists_no_barriers_when_the_task_succeeds_cleanly():
+    stderr = io.StringIO()
+    logger = RunLogger(LogLevel.MINIMAL, stderr=stderr)
+
+    logger.result("succeeded", [])
+
+    assert stderr.getvalue() == "Result: SUCCEEDED\nFound barriers:\n- None\n"
+
+
+def test_minimal_formats_non_keyboard_actions_with_their_arguments():
+    stderr = io.StringIO()
+    logger = RunLogger(LogLevel.MINIMAL, stderr=stderr)
+
+    logger.act("type_text", {"text": "Ada"})
+    logger.act("get_focus_info", {})
+
+    assert stderr.getvalue() == 'Act: TypeText: Ada\nAct: get_focus_info: {}\n'
+
+
 def test_verbose_writes_human_readable_thinking():
     stderr = io.StringIO()
     logger = RunLogger(LogLevel.VERBOSE, stderr=stderr)

@@ -25,6 +25,7 @@ async def think_node(state: BaselineState):
     observability.debug("phase.started", phase="think", step=state["step_count"] + 1)
     response = await state["llm"].infer(state["discovery_context"], state["model"], use_tools=False)
     assert_plain_text_reasoning(response["message"]["content"])
+    observability.reason(response["message"]["content"])
     observability.verbose("phase.completed", phase="think", step=state["step_count"] + 1, thinking=response["message"]["content"])
     observability.debug("phase.completed", phase="think", step=state["step_count"] + 1, thinking=response["message"]["content"])
     return {"discovery_context": [*state["discovery_context"], response["message"]], "step_count": state["step_count"] + 1}
@@ -35,6 +36,9 @@ async def act_node(state: BaselineState):
     observability.debug("phase.started", phase="act", step=state["step_count"])
     response = await state["llm"].infer(state["discovery_context"], state["model"], use_tools=True)
     tool_calls = response.get("tool_calls", [])
+    for call in tool_calls:
+        if call["tool"]["name"] not in {"report_barrier", "report_verdict"}:
+            observability.act(call["tool"]["name"], call["arguments"])
     calls = [{"tool": call["tool"]["name"], "arguments": call["arguments"]} for call in tool_calls]
     observability.verbose("phase.completed", phase="act", step=state["step_count"], tool_calls=calls)
     observability.debug("phase.completed", phase="act", step=state["step_count"], tool_calls=calls)

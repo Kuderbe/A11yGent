@@ -2,13 +2,21 @@
 
 from a11y_gent.observability.events import (
     LogLevel,
+    act,
     close,
     configure,
     debug,
     error,
     info,
+    navigating,
+    observe,
+    reason,
+    result,
     verbose,
     warning,
 )
 
-__all__ = ["LogLevel", "close", "configure", "debug", "error", "info", "verbose", "warning"]
+__all__ = [
+    "LogLevel", "act", "close", "configure", "debug", "error", "info",
+    "navigating", "observe", "reason", "result", "verbose", "warning",
+]
