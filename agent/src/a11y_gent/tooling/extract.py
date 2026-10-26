@@ -31,11 +31,11 @@ def extract_barriers(history: Iterable[Message]) -> list[Barrier]:
     for args in _tool_call_args(history, "report_barrier"):
         barrier: Barrier = {
             "description": str(args.get("description", "")),
+            "expected_behavior": str(args.get("expected_behavior", "")),
+            "actual_behavior": str(args.get("actual_behavior", "")),
+            "reproduction_steps": _coerce_steps(args.get("reproduction_steps", [])),
             "evidence": str(args.get("evidence", "")),
         }
-        wcag = args.get("wcag")
-        if wcag is not None:
-            barrier["wcag"] = _coerce_wcag(wcag)
         barriers.append(barrier)
     return barriers
 
@@ -66,9 +66,7 @@ def _coerce_status(status: Any) -> VerdictStatus:
         return VerdictStatus.FAILED
 
 
-def _coerce_wcag(wcag: Any) -> list[str]:
-    if isinstance(wcag, str):
-        return [wcag]
-    if isinstance(wcag, (list, tuple, set)):
-        return [str(item) for item in wcag]
-    return [str(wcag)]
+def _coerce_steps(steps: Any) -> list[str]:
+    if isinstance(steps, (list, tuple)):
+        return [str(step) for step in steps]
+    return [str(steps)]

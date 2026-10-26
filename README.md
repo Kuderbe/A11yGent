@@ -50,7 +50,7 @@ A11yGent is **not** a replacement for accessibility experts or user testing with
 2. **Agent profile:** the agent receives only information available to a user of the chosen assistive technology (e.g. accessible names, roles, states, headings, landmarks, and navigation traces for a screen-reader profile).
 3. **Interaction loop:** the agent reasons about the task and its current observation, chooses an action, executes it in a Chromium-based browser, and records the outcome.
 4. **Decision:** for each task, the agent decides whether it is completed, blocked, or only possible with avoidable difficulty.
-5. **Output:** an evidence-backed report with the full interaction trace, encountered barriers, and (optionally) mappings to WCAG success criteria.
+5. **Output:** an evidence-backed report with the full interaction trace and encountered barriers.
 
 ## Planned Features
 

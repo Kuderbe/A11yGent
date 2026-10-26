@@ -18,15 +18,17 @@ def make_barrier_tool() -> Tool:
 
     def report_barrier(
         description: str,
+        expected_behavior: str,
+        actual_behavior: str,
+        reproduction_steps: list,
         evidence: str,
-        wcag: list = None,
     ) -> str:
         """Record one accessibility barrier you have just observed.
 
         Call this as soon as you encounter a barrier, before continuing.
-        ``description`` explains what a real screen-reader user hits;
-        ``evidence`` must cite the concrete grounding (quoted NVDA speech, focus
-        state, etc.); ``wcag`` optionally lists WCAG success-criterion strings.
+        Include the expected and actual screen-reader behaviour, executed
+        reproduction steps, and concrete grounding such as quoted NVDA speech or
+        focus state.
         """
         return "barrier recorded"
 
@@ -34,10 +36,10 @@ def make_barrier_tool() -> Tool:
         name="report_barrier",
         description=(
             "Record one accessibility barrier the moment you observe it. Provide "
-            "a description of what a real screen-reader user hits and cited "
-            "evidence (quoted NVDA speech / focus state); optionally a list of "
-            "wcag success-criterion references. Call this once per distinct "
-            "barrier as you find it."
+            "a description of what a real screen-reader user hits, expected and "
+            "actual screen-reader behaviour, executed reproduction steps, and "
+            "cited evidence such as NVDA speech or focus state. Call this once "
+            "per distinct barrier as you find it."
         ),
         tool_function=report_barrier,
     )

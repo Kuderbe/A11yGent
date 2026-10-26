@@ -61,8 +61,10 @@ def few_shot_exemplars() -> list[Message]:
             "name": "assistant",
             "content": (
                 "Action: call report_barrier (description: Subscribe control "
-                "has no name/role; evidence: NVDA said only 'clickable'; wcag: "
-                "4.1.2)."
+                "has no name/role; expected behavior: NVDA announces the "
+                "Subscribe button; actual behavior: NVDA said only 'clickable'; "
+                "reproduction steps: quick-nav to the control; evidence: NVDA "
+                "said only 'clickable')."
             ),
         },
         {

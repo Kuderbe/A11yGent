@@ -47,7 +47,13 @@ def test_verdict_tool_is_noop_sink_with_expected_schema():
 
 def test_barrier_tool_is_noop_sink_with_expected_schema():
     tool = make_barrier_tool()
-    assert tool["tool_function"](description="d", evidence="e") == (
+    assert tool["tool_function"](
+        description="d",
+        expected_behavior="expected",
+        actual_behavior="actual",
+        reproduction_steps=["step"],
+        evidence="e",
+    ) == (
         "barrier recorded"
     )
 
@@ -56,10 +62,18 @@ def test_barrier_tool_is_noop_sink_with_expected_schema():
     required = conv["function"]["parameters"]["required"]
     assert conv["function"]["name"] == "report_barrier"
     assert props["description"]["type"] == "string"
+    assert props["expected_behavior"]["type"] == "string"
+    assert props["actual_behavior"]["type"] == "string"
+    assert props["reproduction_steps"]["type"] == "array"
     assert props["evidence"]["type"] == "string"
-    # wcag: list -> array, and optional (has a default), so not required.
-    assert props["wcag"]["type"] == "array"
-    assert set(required) == {"description", "evidence"}
+    assert "wcag" not in props
+    assert set(required) == {
+        "description",
+        "expected_behavior",
+        "actual_behavior",
+        "reproduction_steps",
+        "evidence",
+    }
 
 
 def test_extract_barriers_from_history():
@@ -67,12 +81,24 @@ def test_extract_barriers_from_history():
         {"origin": MessageOrigin.SYSTEM, "name": "system", "content": "sys"},
         _assistant_call(
             "report_barrier",
-            {"description": "no name", "evidence": "clickable", "wcag": "4.1.2"},
+            {
+                "description": "no name",
+                "expected_behavior": "A name is announced.",
+                "actual_behavior": "No name is announced.",
+                "reproduction_steps": ["Navigate to the control."],
+                "evidence": "clickable",
+            },
             "b1",
         ),
         _assistant_call(
             "report_barrier",
-            {"description": "trap", "evidence": "stuck", "wcag": ["2.1.2"]},
+            {
+                "description": "trap",
+                "expected_behavior": "Focus can leave the control.",
+                "actual_behavior": "Focus remains trapped.",
+                "reproduction_steps": ["Open the dialog.", "Press Tab."],
+                "evidence": "stuck",
+            },
             "b2",
         ),
     ]
@@ -80,17 +106,25 @@ def test_extract_barriers_from_history():
     assert len(barriers) == 2
     assert barriers[0] == {
         "description": "no name",
+        "expected_behavior": "A name is announced.",
+        "actual_behavior": "No name is announced.",
+        "reproduction_steps": ["Navigate to the control."],
         "evidence": "clickable",
-        "wcag": ["4.1.2"],
     }
-    assert barriers[1]["wcag"] == ["2.1.2"]
+    assert barriers[1]["reproduction_steps"] == ["Open the dialog.", "Press Tab."]
 
 
 def test_extract_verdict_uses_reported_barriers():
     history = [
         _assistant_call(
             "report_barrier",
-            {"description": "no name", "evidence": "clickable"},
+            {
+                "description": "no name",
+                "expected_behavior": "A name is announced.",
+                "actual_behavior": "No name is announced.",
+                "reproduction_steps": ["Navigate to the control."],
+                "evidence": "clickable",
+            },
             "b1",
         ),
         _assistant_call(

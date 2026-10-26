@@ -5,7 +5,7 @@ reports through the ``report_verdict`` tool.
 """
 
 from enum import Enum
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 
 
 class VerdictStatus(Enum):
@@ -22,17 +22,19 @@ class VerdictStatus(Enum):
 class Barrier(TypedDict):
     """A single accessibility barrier encountered while attempting the task.
 
-    ``description`` - human-readable explanation of what a real user hits.
-    ``evidence``    - grounding for the barrier: NVDA speech-log entry ids,
-                      a focus snapshot, quoted spoken text, etc. Every barrier
-                      must cite observed evidence.
-    ``wcag``        - optional, best-effort WCAG success-criterion references
-                      (e.g. ["4.1.2", "1.3.1"]).
+    ``description``        - human-readable explanation of what a real user hits.
+    ``expected_behavior``  - the screen-reader behaviour a user should receive.
+    ``actual_behavior``    - the observed screen-reader behaviour.
+    ``reproduction_steps`` - executed steps that reproduce the condition.
+    ``evidence``           - grounding for the barrier: NVDA speech-log entry
+                             ids, a focus snapshot, quoted spoken text, etc.
     """
 
     description: str
+    expected_behavior: str
+    actual_behavior: str
+    reproduction_steps: list[str]
     evidence: str
-    wcag: NotRequired[list[str]]
 
 
 class Verdict(TypedDict):

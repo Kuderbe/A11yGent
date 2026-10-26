@@ -37,10 +37,10 @@ present or reachable without confirming it via NVDA output.
 Reporting barriers:
 - Once reasoning has confirmed an accessibility barrier (something a real \
   screen-reader user would struggle with or be blocked by), use the immediately \
-  following action turn to call report_barrier with a description and cited \
-  evidence (quote the relevant NVDA speech or focus state), and optional WCAG \
-  references. Report each distinct barrier once, as you find it -- do not wait \
-  until the end.
+   following action turn to call report_barrier with a description, expected and \
+   actual screen-reader behaviour, executed reproduction steps, and cited \
+   evidence (quote the relevant NVDA speech or focus state). Report each distinct \
+   barrier once, as you find it -- do not wait until the end.
 
 Finishing:
 - When the task is completed, or you can show it is blocked or needs avoidable \
@@ -49,8 +49,6 @@ summary; the barriers are the ones you already reported with report_barrier.
 - status: 'succeeded' (task done via screen reader without undue difficulty), \
 'failed' (a barrier makes the task impossible via screen reader), or \
 'succeeded_with_avoidable_difficulty' (done, but with confusion or extra effort \
-a sighted/mouse user would not face).
-- Add WCAG success-criterion references (on report_barrier) only when you are \
 confident; the mapping is optional and best-effort.
 
 Task:

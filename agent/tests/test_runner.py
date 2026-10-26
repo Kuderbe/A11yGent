@@ -78,6 +78,13 @@ class _FailingToolLlm(_ScriptedLlm):
 
 
 _TASK = {"url": "http://example.test/barrier.html", "goal": "Do the thing."}
+_BARRIER_ARGUMENTS = {
+    "description": "d",
+    "expected_behavior": "expected",
+    "actual_behavior": "actual",
+    "reproduction_steps": ["step"],
+    "evidence": "e",
+}
 
 
 class _FakeNavigator:
@@ -109,7 +116,7 @@ def _run(llm, max_steps=30):
 def test_runner_returns_reported_verdict_and_barriers():
     llm = _ScriptedLlm(
         [
-            [_tool_call(_BARRIER_TOOL, "b1", {"description": "d", "evidence": "e"})],
+            [_tool_call(_BARRIER_TOOL, "b1", _BARRIER_ARGUMENTS)],
             [_tool_call(_VERDICT_TOOL, "v1", {"status": "failed", "summary": "blocked"})],
         ]
     )
@@ -137,7 +144,7 @@ def test_runner_writes_trajectory():
 
 def test_runner_preserves_trajectory_when_a_tool_fails():
     llm = _FailingToolLlm(
-        [[_tool_call(_BARRIER_TOOL, "b1", {"description": "d", "evidence": "e"})]]
+        [[_tool_call(_BARRIER_TOOL, "b1", _BARRIER_ARGUMENTS)]]
     )
     navigator = _FakeNavigator()
     with tempfile.TemporaryDirectory() as tmp:
@@ -164,7 +171,7 @@ def test_runner_normalises_step_cap_to_failed_verdict():
     # Never reports a verdict: every action turn only reports a barrier, so the
     # loop runs until the step cap and the runner must synthesise a verdict.
     llm = _ScriptedLlm(
-        [[_tool_call(_BARRIER_TOOL, f"b{i}", {"description": "d", "evidence": "e"})]
+        [[_tool_call(_BARRIER_TOOL, f"b{i}", _BARRIER_ARGUMENTS)]
          for i in range(50)]
     )
 
