@@ -13,20 +13,33 @@ from a11y_gent.tooling.verdict import make_verdict_tool
 from mcp import Client
 
 
+async def _validate_mcp_endpoint(endpoint_name: str, url: str) -> None:
+    """Confirm that an MCP endpoint accepts a session and serves tools."""
+    try:
+        async with Client(url) as session:
+            await session.list_tools()
+    except Exception as exc:
+        raise RuntimeError(
+            f"{endpoint_name} MCP endpoint is unavailable at {url}: {exc}"
+        ) from exc
+
+
 async def execute(config: RunConfig, program: AgentProgram):
     logger = observability.configure(config.log_level, config.log_file_template)
-    observability.navigating()
-    observability.info(
-        "run.started",
-        program_id=program.id,
-        url=config.task["url"],
-        goal=config.task["goal"],
-        model=config.model,
-        nvda_max_steps=config.nvda_max_steps,
-        log_file=str(logger.log_file_path) if logger.log_file_path else None,
-    )
-    write_started_metadata(config, program, logger.run_id)
     try:
+        await _validate_mcp_endpoint("NVDA", config.nvda_mcp_url)
+        await _validate_mcp_endpoint("Chrome DevTools", config.devtools_mcp_url)
+        observability.navigating()
+        observability.info(
+            "run.started",
+            program_id=program.id,
+            url=config.task["url"],
+            goal=config.task["goal"],
+            model=config.model,
+            nvda_max_steps=config.nvda_max_steps,
+            log_file=str(logger.log_file_path) if logger.log_file_path else None,
+        )
+        write_started_metadata(config, program, logger.run_id)
         local_tools = [make_verdict_tool(), make_barrier_tool()]
         async with Client(config.nvda_mcp_url) as nvda_session:
             mcp_tools = await register_mcp_tools(nvda_session)
