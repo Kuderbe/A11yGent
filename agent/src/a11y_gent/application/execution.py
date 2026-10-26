@@ -8,6 +8,9 @@ from a11y_gent.application.artifacts import write_result, write_started_metadata
 from a11y_gent.application.program import AgentProgram, RunContext
 from a11y_gent.config import RunConfig
 from a11y_gent.main_support import additional_headers_for
+from a11y_gent.model.task import Task
+from a11y_gent.model.workflow import WorkflowTask
+from a11y_gent.task_selection import select_cli_tasks
 from a11y_gent.tooling.barrier import make_barrier_tool
 from a11y_gent.tooling.verdict import make_verdict_tool
 from mcp import Client
@@ -29,12 +32,16 @@ async def execute(config: RunConfig, program: AgentProgram):
     try:
         await _validate_mcp_endpoint("NVDA", config.nvda_mcp_url)
         await _validate_mcp_endpoint("Chrome DevTools", config.devtools_mcp_url)
+        selected_tasks = select_cli_tasks(config)
+        if not selected_tasks:
+            raise RuntimeError("No task selected; task discovery is not available yet")
+        task = _program_task(selected_tasks[0], config)
         observability.navigating()
         observability.info(
             "run.started",
             program_id=program.id,
-            url=config.task["url"],
-            goal=config.task["goal"],
+            url=task["url"],
+            goal=task["goal"],
             model=config.model,
             nvda_max_steps=config.nvda_max_steps,
             log_file=str(logger.log_file_path) if logger.log_file_path else None,
@@ -50,10 +57,10 @@ async def execute(config: RunConfig, program: AgentProgram):
                 additional_headers_for(config.openai_base_url),
             )
             navigator = McpNvdaNavigator(nvda_session)
-            await navigator.open(config.task["url"])
+            await navigator.open(task["url"])
             result = await program.run(
                 RunContext(
-                    task=config.task,
+                    task=task,
                     model=config.model,
                     max_steps=config.nvda_max_steps,
                     trajectory_path=config.trajectory_path,
@@ -77,3 +84,10 @@ async def execute(config: RunConfig, program: AgentProgram):
         raise
     finally:
         observability.close()
+
+
+def _program_task(selected_task: WorkflowTask, config: RunConfig) -> Task:
+    task: Task = {"url": selected_task["url"], "goal": selected_task["description"]}
+    if config.task is not None and "success_hint" in config.task:
+        task["success_hint"] = config.task["success_hint"]
+    return task

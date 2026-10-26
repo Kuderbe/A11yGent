@@ -51,6 +51,30 @@ class _Program:
         raise AssertionError("The program must not run after startup validation fails")
 
 
+class _SuccessfulProgram:
+    id = "test"
+
+    def __init__(self):
+        self.context = None
+
+    async def run(self, context):
+        self.context = context
+        return {
+            "task": context.task,
+            "verdict": {"status": "succeeded", "summary": "done", "barriers": []},
+            "trajectory_path": context.trajectory_path,
+        }
+
+
+class _Navigator:
+    def __init__(self, session):
+        self.session = session
+        self.opened_url = None
+
+    async def open(self, url):
+        self.opened_url = url
+
+
 def _config(path):
     return RunConfig(
         task={"url": "http://application.test", "goal": "Complete the task"},
@@ -93,6 +117,67 @@ def test_execution_stops_before_task_work_when_devtools_mcp_is_unavailable():
 
 def test_execution_stops_before_task_work_when_nvda_mcp_is_unavailable():
     _assert_unavailable_endpoint_stops_execution("http://nvda.test/mcp", "NVDA")
+
+
+def test_execution_runs_the_cli_selected_task_as_task_one():
+    original_validate = execution._validate_mcp_endpoint
+    original_register = execution.register_mcp_tools
+    original_client = execution.Client
+    original_llm = execution.OpenaiLlmClient
+    original_navigator = execution.McpNvdaNavigator
+    original_started = execution.write_started_metadata
+    original_result = execution.write_result
+    original_select = getattr(execution, "select_cli_tasks", None)
+    program = _SuccessfulProgram()
+    navigators = []
+
+    async def _validate(endpoint_name, url):
+        return None
+
+    async def _register(session):
+        return []
+
+    def _select(config):
+        return [
+            {
+                "number": 1,
+                "url": "http://application.test",
+                "description": "Selected task",
+            }
+        ]
+
+    def _navigator(session):
+        navigator = _Navigator(session)
+        navigators.append(navigator)
+        return navigator
+
+    try:
+        execution._validate_mcp_endpoint = _validate
+        execution.register_mcp_tools = _register
+        execution.Client = lambda url: _AvailableSession()
+        execution.OpenaiLlmClient = lambda *args: object()
+        execution.McpNvdaNavigator = _navigator
+        execution.write_started_metadata = lambda *args: None
+        execution.write_result = lambda *args: None
+        execution.select_cli_tasks = _select
+
+        result = asyncio.run(execution.execute(_config(Path("trajectory.jsonl")), program))
+    finally:
+        execution._validate_mcp_endpoint = original_validate
+        execution.register_mcp_tools = original_register
+        execution.Client = original_client
+        execution.OpenaiLlmClient = original_llm
+        execution.McpNvdaNavigator = original_navigator
+        execution.write_started_metadata = original_started
+        execution.write_result = original_result
+        if original_select is None:
+            del execution.select_cli_tasks
+        else:
+            execution.select_cli_tasks = original_select
+
+    assert program.context.task == {"url": "http://application.test", "goal": "Selected task"}
+    assert navigators[0].opened_url == "http://application.test"
+    assert result["task"] == program.context.task
 
 
 def _run_all():
