@@ -23,6 +23,7 @@ def test_metadata_records_program_without_api_key():
     with tempfile.TemporaryDirectory() as tmp:
         trajectory = str(Path(tmp) / "run.trajectory.jsonl")
         config = RunConfig(
+            application_url="http://example.test",
             task={"url": "http://example.test", "goal": "Test it"},
             model="model",
             openai_base_url="http://endpoint",

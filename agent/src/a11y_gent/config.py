@@ -13,6 +13,7 @@ from a11y_gent.observability import LogLevel
 
 @dataclass(frozen=True)
 class RunConfig:
+    application_url: str
     task: Task | None
     model: str
     openai_base_url: str

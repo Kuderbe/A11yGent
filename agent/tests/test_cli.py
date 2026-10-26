@@ -77,6 +77,7 @@ def test_cli_builds_config_from_options():
         "goal": "do it",
         "success_hint": "done when Y",
     }
+    assert config.application_url == "http://x"
     assert config.openai_base_url == "http://base"
     assert config.openai_api_key == "key"
     assert config.model == "gpt-5-mini"
@@ -112,6 +113,7 @@ def test_cli_allows_discovery_without_a_goal():
     result, config = _invoke(["--url", "http://application.test"])
     assert result.exit_code == 0, result.output
     assert config.task is None
+    assert config.application_url == "http://application.test"
     assert config.discovery_instructions is None
     assert config.discovery_max_steps == 150
     assert config.nvda_max_steps == 150

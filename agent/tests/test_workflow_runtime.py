@@ -128,6 +128,7 @@ def test_workflow_run_keeps_task_contexts_and_writes_chronological_provenance():
 
 def _config(trajectory_path: Path, resume_path: str | None = None) -> RunConfig:
     return RunConfig(
+        application_url="http://application.test",
         task=None,
         model="test-model",
         openai_base_url="http://inference.test",

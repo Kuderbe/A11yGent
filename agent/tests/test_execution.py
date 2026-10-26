@@ -77,6 +77,7 @@ class _Navigator:
 
 def _config(path):
     return RunConfig(
+        application_url="http://application.test",
         task={"url": "http://application.test", "goal": "Complete the task"},
         model="test-model",
         openai_base_url="http://inference.test",
@@ -178,6 +179,73 @@ def test_execution_runs_the_cli_selected_task_as_task_one():
     assert program.context.task == {"url": "http://application.test", "goal": "Selected task"}
     assert navigators[0].opened_url == "http://application.test"
     assert result["task"] == program.context.task
+
+
+def test_execution_uses_discovered_task_when_no_cli_task_is_supplied():
+    original_validate = execution._validate_mcp_endpoint
+    original_discover = getattr(execution, "_discover_tasks", None)
+    original_register = execution.register_mcp_tools
+    original_client = execution.Client
+    original_llm = execution.OpenaiLlmClient
+    original_navigator = execution.McpNvdaNavigator
+    original_started = execution.write_started_metadata
+    original_result = execution.write_result
+    program = _SuccessfulProgram()
+
+    async def _validate(endpoint_name, url):
+        return None
+
+    async def _discover(config):
+        return [
+            {
+                "number": 1,
+                "url": "http://application.test",
+                "description": "Discovered task",
+            }
+        ]
+
+    async def _register(session):
+        return []
+
+    try:
+        execution._validate_mcp_endpoint = _validate
+        execution._discover_tasks = _discover
+        execution.register_mcp_tools = _register
+        execution.Client = lambda url: _AvailableSession()
+        execution.OpenaiLlmClient = lambda *args: object()
+        execution.McpNvdaNavigator = lambda session: _Navigator(session)
+        execution.write_started_metadata = lambda *args: None
+        execution.write_result = lambda *args: None
+
+        result = asyncio.run(execution.execute(_config_without_task(Path("trajectory.jsonl")), program))
+    finally:
+        execution._validate_mcp_endpoint = original_validate
+        execution.register_mcp_tools = original_register
+        execution.Client = original_client
+        execution.OpenaiLlmClient = original_llm
+        execution.McpNvdaNavigator = original_navigator
+        execution.write_started_metadata = original_started
+        execution.write_result = original_result
+        if original_discover is None:
+            del execution._discover_tasks
+        else:
+            execution._discover_tasks = original_discover
+
+    assert program.context.task == {"url": "http://application.test", "goal": "Discovered task"}
+    assert result["task"] == program.context.task
+
+
+def _config_without_task(path):
+    return RunConfig(
+        application_url="http://application.test",
+        task=None,
+        model="test-model",
+        openai_base_url="http://inference.test",
+        openai_api_key="secret",
+        nvda_mcp_url="http://nvda.test/mcp",
+        devtools_mcp_url="http://devtools.test/mcp",
+        trajectory_path=str(path),
+    )
 
 
 def _run_all():

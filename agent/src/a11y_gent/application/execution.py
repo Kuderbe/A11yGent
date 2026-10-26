@@ -9,9 +9,12 @@ from a11y_gent.application.program import AgentProgram, RunContext
 from a11y_gent.config import RunConfig
 from a11y_gent.main_support import additional_headers_for
 from a11y_gent.model.task import Task
-from a11y_gent.model.workflow import WorkflowTask
+from a11y_gent.model.workflow import WorkflowPhase, WorkflowTask
+from a11y_gent.prompts import make_discovery_completion_tool
+from a11y_gent.task_discovery import discover_tasks
 from a11y_gent.task_selection import select_cli_tasks
 from a11y_gent.tooling.barrier import make_barrier_tool
+from a11y_gent.tooling.phase_tools import tools_for_phase
 from a11y_gent.tooling.verdict import make_verdict_tool
 from mcp import Client
 
@@ -34,7 +37,7 @@ async def execute(config: RunConfig, program: AgentProgram):
         await _validate_mcp_endpoint("Chrome DevTools", config.devtools_mcp_url)
         selected_tasks = select_cli_tasks(config)
         if not selected_tasks:
-            raise RuntimeError("No task selected; task discovery is not available yet")
+            selected_tasks = await _discover_tasks(config)
         task = _program_task(selected_tasks[0], config)
         observability.navigating()
         observability.info(
@@ -91,3 +94,18 @@ def _program_task(selected_task: WorkflowTask, config: RunConfig) -> Task:
     if config.task is not None and "success_hint" in config.task:
         task["success_hint"] = config.task["success_hint"]
     return task
+
+
+async def _discover_tasks(config: RunConfig) -> list[WorkflowTask]:
+    async with Client(config.devtools_mcp_url) as devtools_session:
+        devtools_tools = await register_mcp_tools(devtools_session)
+        llm = OpenaiLlmClient(
+            config.openai_base_url,
+            config.openai_api_key,
+            [
+                *tools_for_phase(WorkflowPhase.DISCOVERY, [], devtools_tools),
+                make_discovery_completion_tool(),
+            ],
+            additional_headers_for(config.openai_base_url),
+        )
+        return await discover_tasks(config, llm)

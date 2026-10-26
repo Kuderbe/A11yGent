@@ -11,7 +11,7 @@ def select_cli_tasks(config: RunConfig) -> list[WorkflowTask]:
     return [
         {
             "number": 1,
-            "url": config.task["url"],
+            "url": config.application_url,
             "description": config.task["goal"],
         }
     ]

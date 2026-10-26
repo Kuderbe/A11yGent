@@ -66,6 +66,7 @@ def build_app(program: AgentProgram) -> typer.Typer:
         ),
     ) -> None:
         config = RunConfig(
+            application_url=url,
             task=build_task(url, goal, success_hint) if goal is not None else None,
             model=model,
             openai_base_url=os.environ["A11Y_GENT_OPENAI_BASE_URL"],
