@@ -40,7 +40,6 @@ class DiscoveryResult:
 class Candidate(TypedDict):
     """An unverified condition that retrospective analysis requests to verify."""
 
-    task_number: int
     description: str
     verification_brief: str
 

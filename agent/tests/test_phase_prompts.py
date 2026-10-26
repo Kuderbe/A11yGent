@@ -97,7 +97,6 @@ def test_verify_prompt_receives_only_task_candidate_and_brief():
         _task(),
         4,
         {
-            "task_number": 1,
             "description": "The confirmation may not be announced.",
             "verification_brief": "Submit and inspect NVDA speech.",
         },

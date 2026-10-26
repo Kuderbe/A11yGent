@@ -9,7 +9,6 @@ from a11y_gent.config import RunConfig
 from a11y_gent.model.message import MessageOrigin
 from a11y_gent.model.verdict import VerdictStatus
 from a11y_gent.task_solving import solve_task
-from a11y_gent.workflow_runtime import create_workflow_run
 
 
 class _ScriptedLlm(LlmClient):
@@ -75,7 +74,7 @@ def test_solve_task_fails_at_its_nvda_budget_and_keeps_reported_barriers():
     }
 
 
-def test_solve_task_keeps_checkpointed_attempts_isolated_by_task_number():
+def test_solve_task_keeps_attempts_isolated_by_task_number():
     llm = _ScriptedLlm([[_completion_call("succeeded", "First task done.")], [_completion_call("failed", "Second task blocked.")]])
 
     first, second = _solve_two_tasks(llm)
@@ -112,11 +111,7 @@ def _solve(llm, nvda_max_steps=3):
     with tempfile.TemporaryDirectory() as tmp:
         async def run():
             config = _config(Path(tmp), nvda_max_steps)
-            workflow_run = await create_workflow_run(config, "solve-test")
-            try:
-                return await solve_task(config, llm, workflow_run, _task(), [_nvda_call()["tool"]])
-            finally:
-                await workflow_run.close()
+            return await solve_task(config, llm, _task(), [_nvda_call()["tool"]])
 
         return asyncio.run(run())
 
@@ -125,19 +120,14 @@ def _solve_two_tasks(llm):
     with tempfile.TemporaryDirectory() as tmp:
         async def run():
             config = _config(Path(tmp), 3)
-            workflow_run = await create_workflow_run(config, "solve-test")
-            try:
-                first = await solve_task(config, llm, workflow_run, _task(), [_nvda_call()["tool"]])
-                second = await solve_task(
-                    config,
-                    llm,
-                    workflow_run,
-                    {"number": 2, "url": "https://shop.example/", "description": "Review the order."},
-                    [_nvda_call()["tool"]],
-                )
-                return first, second
-            finally:
-                await workflow_run.close()
+            first = await solve_task(config, llm, _task(), [_nvda_call()["tool"]])
+            second = await solve_task(
+                config,
+                llm,
+                {"number": 2, "url": "https://shop.example/", "description": "Review the order."},
+                [_nvda_call()["tool"]],
+            )
+            return first, second
 
         return asyncio.run(run())
 

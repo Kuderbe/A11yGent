@@ -16,6 +16,8 @@ from a11y_gent.tooling.extract import extract_barriers
 class RetrospectiveState(TypedDict):
     """State persisted for one retrospective analysis."""
 
+    task: WorkflowTask
+    solve_task_history: list[Message]
     history: list[Message]
     candidates: list[Candidate]
 
@@ -27,33 +29,29 @@ async def retrospect(
     model: str,
 ) -> list[Candidate]:
     """Generate unverified candidates from one completed solve-task history."""
-    graph = _build_graph(
-        task,
-        solve_task_history,
-        llm,
-        make_retrospective_completion_tool(),
-        model,
-    )
-    state = await graph.ainvoke(_initial_state(task, solve_task_history))
+    graph = build_retrospective_graph(llm, make_retrospective_completion_tool(), model)
+    state = await graph.ainvoke(initial_retrospective_state(task, solve_task_history))
     return state["candidates"]
 
 
-def _build_graph(
-    task: WorkflowTask,
-    solve_task_history: list[Message],
+def build_retrospective_graph(
     llm: LlmClient,
     completion_tool: Tool,
     model: str,
 ):
     graph = StateGraph(RetrospectiveState)
-    graph.add_node("analyze", _analyze_node(model, task, solve_task_history, llm, completion_tool))
+    graph.add_node("analyze", _analyze_node(model, llm, completion_tool))
     graph.add_edge(START, "analyze")
     graph.add_edge("analyze", END)
     return graph.compile()
 
 
-def _initial_state(task: WorkflowTask, solve_task_history: list[Message]) -> RetrospectiveState:
+def initial_retrospective_state(
+    task: WorkflowTask, solve_task_history: list[Message]
+) -> RetrospectiveState:
     return {
+        "task": task,
+        "solve_task_history": solve_task_history,
         "history": [
             {
                 "origin": MessageOrigin.USER,
@@ -67,8 +65,6 @@ def _initial_state(task: WorkflowTask, solve_task_history: list[Message]) -> Ret
 
 def _analyze_node(
     model: str,
-    task: WorkflowTask,
-    solve_task_history: list[Message],
     llm: LlmClient,
     completion_tool: Tool,
 ):
@@ -82,8 +78,10 @@ def _analyze_node(
         tool_result = await llm.execute_tool_call(
             deserialize_tool_call(serialized_call, {completion_tool["name"]: completion_tool})
         )
-        candidates = _candidates(task, solve_task_history, call["arguments"])
+        candidates = _candidates(state["solve_task_history"], call["arguments"])
         return {
+            "task": state["task"],
+            "solve_task_history": state["solve_task_history"],
             "history": [
                 *state["history"],
                 _action_message(response["message"], serialized_call),
@@ -95,9 +93,7 @@ def _analyze_node(
     return analyze
 
 
-def _candidates(
-    task: WorkflowTask, solve_task_history: list[Message], arguments: dict
-) -> list[Candidate]:
+def _candidates(solve_task_history: list[Message], arguments: dict) -> list[Candidate]:
     descriptions = [str(description) for description in arguments["descriptions"]]
     verification_briefs = [str(brief) for brief in arguments["verification_briefs"]]
     if len(descriptions) != len(verification_briefs):
@@ -105,7 +101,6 @@ def _candidates(
     reported = {_normalize(barrier["description"]) for barrier in extract_barriers(solve_task_history)}
     return [
         {
-            "task_number": task["number"],
             "description": description,
             "verification_brief": verification_brief,
         }

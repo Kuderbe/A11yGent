@@ -10,12 +10,11 @@ from a11y_gent.model.message import Message, MessageOrigin
 from a11y_gent.model.tool import Tool
 from a11y_gent.model.tool_call import SerializedToolCall, deserialize_tool_call, serialize_tool_call
 from a11y_gent.model.verdict import Verdict, VerdictStatus
-from a11y_gent.model.workflow import WorkflowPhase, WorkflowTask
+from a11y_gent.model.workflow import WorkflowTask
 from a11y_gent.prompts import build_solve_task_prompt, make_solve_task_completion_tool
 from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
 from a11y_gent.tooling.barrier import make_barrier_tool
 from a11y_gent.tooling.extract import extract_barriers
-from a11y_gent.workflow_runtime import WorkflowRun
 
 
 class SolveTaskState(TypedDict):
@@ -32,21 +31,16 @@ class SolveTaskState(TypedDict):
 async def solve_task(
     config: RunConfig,
     llm: LlmClient,
-    workflow_run: WorkflowRun,
     task: WorkflowTask,
     nvda_tools: list[Tool],
 ) -> Verdict:
     """Attempt one task with NVDA tools and local direct-reporting sinks only."""
-    graph = _build_graph(
+    graph = build_solve_task_graph(
         config,
         llm,
         [*nvda_tools, make_barrier_tool(), make_solve_task_completion_tool()],
-        workflow_run,
     )
-    state = await graph.ainvoke(
-        _initial_state(task),
-        workflow_run.phase_thread_config(WorkflowPhase.SOLVE_TASK, task_number=task["number"]),
-    )
+    state = await graph.ainvoke(initial_solve_task_state(task))
     barriers = extract_barriers(state["history"])
     if state["completed"]:
         return {"status": _status(state["status"]), "summary": state["summary"], "barriers": barriers}
@@ -57,7 +51,7 @@ async def solve_task(
     }
 
 
-def _build_graph(config: RunConfig, llm: LlmClient, tools: list[Tool], workflow_run: WorkflowRun):
+def build_solve_task_graph(config: RunConfig, llm: LlmClient, tools: list[Tool]):
     graph = StateGraph(SolveTaskState)
     graph.add_node("reason", _reason_node(llm, config.model))
     graph.add_node("act", _act_node(llm, config.model))
@@ -66,10 +60,10 @@ def _build_graph(config: RunConfig, llm: LlmClient, tools: list[Tool], workflow_
     graph.add_edge("reason", "act")
     graph.add_conditional_edges("act", _after_act, {"observe": "observe", "reason": "reason"})
     graph.add_conditional_edges("observe", _after_observe(config.nvda_max_steps), {"reason": "reason", "done": END})
-    return graph.compile(checkpointer=workflow_run.checkpointer)
+    return graph.compile()
 
 
-def _initial_state(task: WorkflowTask) -> SolveTaskState:
+def initial_solve_task_state(task: WorkflowTask) -> SolveTaskState:
     return {
         "history": [
             {

@@ -1,22 +1,35 @@
-"""Checkpointed state and provenance for phased workflow execution."""
+"""Checkpointed superstate for phased workflow execution."""
 
 from typing import TypedDict
 
+from a11y_gent.model.message import Message
+from a11y_gent.model.workflow import Candidate, WorkflowTask
 
-class WorkflowProvenance(TypedDict):
-    """One chronologically recorded workflow phase update."""
 
-    run_id: str
-    phase: str
-    task_number: int | None
-    candidate_reference: int | None
+class SolveTaskSubstate(TypedDict):
+    """Durable solve-task output owned by one task pipeline."""
+
+    history: list[Message]
+
+
+class RetrospectiveSubstate(TypedDict):
+    """Durable retrospective output owned by one task pipeline."""
+
+    history: list[Message]
+    candidates: list[Candidate]
+
+
+class TaskPipelineState(TypedDict):
+    """All phase substates for one selected task."""
+
+    task: WorkflowTask
+    solve_task_state: SolveTaskSubstate
+    retrospective_state: RetrospectiveSubstate
+    verification_state: dict[str, object]
+    final_result_state: dict[str, object]
 
 
 class WorkflowRuntimeState(TypedDict):
-    """State persisted by the workflow checkpointer."""
+    """State retained by the checkpointed workflow supergraph."""
 
-    phase_contexts: dict[str, object]
-    pending_phase: str
-    pending_context: object
-    pending_task_number: int | None
-    pending_candidate_reference: int | None
+    task_pipelines: list[TaskPipelineState]

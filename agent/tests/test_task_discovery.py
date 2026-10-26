@@ -10,7 +10,6 @@ from a11y_gent.model.message import MessageOrigin
 from a11y_gent.model.workflow import DiscoveryResult
 from a11y_gent.runtime.reasoning import ReasoningToolCallSyntaxError
 from a11y_gent.task_discovery import discover_tasks
-from a11y_gent.workflow_runtime import create_workflow_run, resume_workflow_run
 
 
 class _ScriptedLlm(LlmClient):
@@ -164,24 +163,6 @@ def test_discover_tasks_fails_when_completion_contains_no_tasks():
         raise AssertionError("Expected discovery with no tasks to fail")
 
 
-def test_discover_tasks_keeps_numbers_stable_across_recovery():
-    with tempfile.TemporaryDirectory() as tmp:
-        first = _ScriptedLlm([[_completion_call(["Browse products."], incomplete=True)]])
-        second = _ScriptedLlm(
-            [[_completion_call(["Browse products.", "Purchase a product."], incomplete=False)]]
-        )
-
-        discovery = asyncio.run(_recover_discovery(Path(tmp), first, second))
-
-    assert discovery == DiscoveryResult(
-        tasks=[
-            {"number": 1, "url": "https://shop.example/", "description": "Browse products."},
-            {"number": 2, "url": "https://shop.example/", "description": "Purchase a product."},
-        ],
-        incomplete=False,
-    )
-
-
 def test_discover_tasks_rejects_serialized_tool_calls_in_reasoning():
     llm = _LeakingReasoningLlm()
 
@@ -251,64 +232,13 @@ def _discover(config, llm):
                 discovery_instructions=config.discovery_instructions,
                 discovery_max_steps=config.discovery_max_steps,
             )
-            run = await create_workflow_run(isolated_config, "discovery-test")
-            try:
-                return await discover_tasks(
-                    isolated_config,
-                    llm,
-                    run,
-                    [_devtools_call()["tool"], _completion_call([], False)["tool"]],
-                )
-            finally:
-                await run.close()
-
-        return asyncio.run(run_discovery())
-
-
-async def _recover_discovery(tmp, first_llm, second_llm):
-    config = _config(discovery_max_steps=1)
-    config = RunConfig(
-        application_url=config.application_url,
-        task=config.task,
-        model=config.model,
-        openai_base_url=config.openai_base_url,
-        openai_api_key=config.openai_api_key,
-        nvda_mcp_url=config.nvda_mcp_url,
-        trajectory_path=str(tmp / "trajectory.jsonl"),
-        discovery_instructions=config.discovery_instructions,
-        discovery_max_steps=1,
-    )
-    first_run = await create_workflow_run(config, "recovery-test")
-    try:
-        await discover_tasks(
-            config,
-            first_llm,
-            first_run,
-            [_devtools_call()["tool"], _completion_call([], False)["tool"]],
-        )
-        resumed = await resume_workflow_run(first_run.checkpoint_path, first_run.checkpoint_id)
-        try:
-            resumed_config = RunConfig(
-                application_url=config.application_url,
-                task=config.task,
-                model=config.model,
-                openai_base_url=config.openai_base_url,
-                openai_api_key=config.openai_api_key,
-                nvda_mcp_url=config.nvda_mcp_url,
-                trajectory_path=config.trajectory_path,
-                discovery_instructions=config.discovery_instructions,
-                discovery_max_steps=2,
-            )
             return await discover_tasks(
-                resumed_config,
-                second_llm,
-                resumed,
+                isolated_config,
+                llm,
                 [_devtools_call()["tool"], _completion_call([], False)["tool"]],
             )
-        finally:
-            await resumed.close()
-    finally:
-        await first_run.close()
+
+        return asyncio.run(run_discovery())
 
 
 def _run_all():

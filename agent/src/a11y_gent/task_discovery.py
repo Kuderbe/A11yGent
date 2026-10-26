@@ -10,10 +10,9 @@ from a11y_gent.config import RunConfig
 from a11y_gent.model.message import Message, MessageOrigin
 from a11y_gent.model.tool import Tool
 from a11y_gent.model.tool_call import ToolCall, serialize_tool_call
-from a11y_gent.model.workflow import DiscoveryResult, WorkflowPhase, WorkflowTask
+from a11y_gent.model.workflow import DiscoveryResult, WorkflowTask
 from a11y_gent.prompts import build_discovery_prompt
 from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
-from a11y_gent.workflow_runtime import WorkflowRun
 
 
 class DiscoveryState(TypedDict):
@@ -36,19 +35,17 @@ class DiscoveryToolCall(TypedDict):
 
 
 async def discover_tasks(
-    config: RunConfig, llm: LlmClient, workflow_run: WorkflowRun, tools: list[Tool]
+    config: RunConfig, llm: LlmClient, tools: list[Tool]
 ) -> DiscoveryResult:
-    """Discover tasks with the workflow run's shared SQLite checkpointer."""
-    graph = _build_graph(config, llm, workflow_run, tools)
-    state = await graph.ainvoke(_initial_state(config), workflow_run.phase_thread_config(WorkflowPhase.DISCOVERY))
+    """Discover tasks through a standalone local phase invocation."""
+    graph = build_discovery_graph(config, llm, tools)
+    state = await graph.ainvoke(initial_discovery_state(config))
     if state["tasks"]:
         return DiscoveryResult(tasks=state["tasks"], incomplete=state["incomplete"])
     raise RuntimeError("Discovery found no suitable task")
 
 
-def _build_graph(
-    config: RunConfig, llm: LlmClient, workflow_run: WorkflowRun, tools: list[Tool]
-):
+def build_discovery_graph(config: RunConfig, llm: LlmClient, tools: list[Tool]):
     graph = StateGraph(DiscoveryState)
     graph.add_node("reason", _reason_node(llm, config.model))
     graph.add_node("act", _act_node(llm, config.model))
@@ -57,10 +54,10 @@ def _build_graph(
     graph.add_edge("reason", "act")
     graph.add_conditional_edges("act", _after_act, {"observe": "observe", "reason": "reason"})
     graph.add_conditional_edges("observe", _after_observe(config.discovery_max_steps), {"reason": "reason", "done": END})
-    return graph.compile(checkpointer=workflow_run.checkpointer)
+    return graph.compile()
 
 
-def _initial_state(config: RunConfig) -> DiscoveryState:
+def initial_discovery_state(config: RunConfig) -> DiscoveryState:
     return {
         "history": [
             {

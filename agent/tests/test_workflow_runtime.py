@@ -1,149 +1,183 @@
-"""Offline durability tests for the checkpointed workflow runtime."""
+"""Offline contracts for the checkpointed workflow supergraph."""
 
 import asyncio
 import tempfile
-import json
 from pathlib import Path
 
+from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.config import RunConfig
-from a11y_gent.model.workflow import WorkflowPhase
+from a11y_gent.model.message import MessageOrigin
 from a11y_gent.workflow_runtime import (
+    WorkflowDependencies,
     create_workflow_run,
     resume_workflow_run,
-    resume_workflow_run_from_metadata,
 )
 
 
-def test_workflow_run_persists_phase_context_for_resume():
+class _ScriptedLlm(LlmClient):
+    def __init__(self):
+        self.histories = []
+
+    async def infer(self, history, model, use_tools=True):
+        self.histories.append(history)
+        return {
+            "message": {
+                "origin": MessageOrigin.ASSISTANT,
+                "name": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "retrospective-1",
+                        "tool": {
+                            "name": "complete_retrospective",
+                            "description": "",
+                            "tool_function": lambda: None,
+                        },
+                        "arguments": {
+                            "descriptions": ["The confirmation might not be announced."],
+                            "verification_briefs": ["Submit and inspect NVDA speech."],
+                        },
+                    }
+                ],
+            },
+            "tool_calls": [
+                {
+                    "id": "retrospective-1",
+                    "tool": {
+                        "name": "complete_retrospective",
+                        "description": "",
+                        "tool_function": lambda: None,
+                    },
+                    "arguments": {
+                        "descriptions": ["The confirmation might not be announced."],
+                        "verification_briefs": ["Submit and inspect NVDA speech."],
+                    },
+                }
+            ],
+        }
+
+    async def execute_tool_call(self, tool_call):
+        return {
+            "origin": MessageOrigin.TOOL,
+            "name": tool_call["tool"]["name"],
+            "content": "retrospective completed",
+            "reference_id": tool_call["id"],
+        }
+
+
+def test_supergraph_persists_nested_retrospective_state_for_resume():
     with tempfile.TemporaryDirectory() as tmp:
-        asyncio.run(_persist_phase_context_for_resume(Path(tmp)))
+        asyncio.run(_persist_nested_state_for_resume(Path(tmp)))
 
 
-def test_workflow_run_keeps_phase_contexts_isolated_and_records_provenance():
-    with tempfile.TemporaryDirectory() as tmp:
-        asyncio.run(_keep_phase_contexts_isolated(Path(tmp)))
-
-
-def test_workflow_run_writes_resume_metadata_with_stable_identity():
-    with tempfile.TemporaryDirectory() as tmp:
-        asyncio.run(_resume_from_metadata(Path(tmp)))
-
-
-def test_workflow_run_uses_the_configured_resume_checkpoint_path():
-    with tempfile.TemporaryDirectory() as tmp:
-        asyncio.run(_use_configured_resume_checkpoint_path(Path(tmp)))
-
-
-def test_workflow_run_keeps_task_contexts_and_writes_chronological_provenance():
-    with tempfile.TemporaryDirectory() as tmp:
-        asyncio.run(_keep_task_contexts_and_provenance(Path(tmp)))
-
-
-async def _persist_phase_context_for_resume(tmp: Path):
-    config = _config(tmp / "trajectory.jsonl")
-    run = await create_workflow_run(config, "run-123")
+async def _persist_nested_state_for_resume(tmp: Path):
+    llm = _ScriptedLlm()
+    dependencies = WorkflowDependencies(retrospective_llm=llm, retrospective_model="test-model")
+    run = await create_workflow_run(_config(tmp / "trajectory.jsonl"), "run-123", dependencies)
     try:
-        await run.record_phase_context(
-            WorkflowPhase.DISCOVERY,
-            ["Inspect account registration.", "Add a product to the cart."],
+        completed = await run.invoke(
+            {
+                "task_pipelines": [
+                    {
+                        "task": _task(),
+                        "solve_task_state": {"history": _solve_history()},
+                        "retrospective_state": {"history": [], "candidates": []},
+                        "verification_state": {},
+                        "final_result_state": {},
+                    }
+                ]
+            }
         )
-        resumed = await resume_workflow_run(run.checkpoint_path, run.checkpoint_id)
+        resumed = await resume_workflow_run(run.checkpoint_path, run.checkpoint_id, dependencies)
         try:
-            assert run.checkpoint_id == "run-123"
-            assert resumed.checkpoint_id == "run-123"
-            assert await resumed.phase_context(WorkflowPhase.DISCOVERY) == [
-                "Inspect account registration.",
-                "Add a product to the cart.",
-            ]
+            persisted = await resumed.state()
         finally:
             await resumed.close()
     finally:
         await run.close()
 
+    pipeline = completed["task_pipelines"][0]
+    assert pipeline["retrospective_state"]["candidates"] == [
+        {
+            "description": "The confirmation might not be announced.",
+            "verification_brief": "Submit and inspect NVDA speech.",
+        }
+    ]
+    assert persisted == completed
+    assert "candidates" not in completed
+    assert "confirmed_barriers" not in completed
+    assert "task_results" not in completed
 
-async def _keep_phase_contexts_isolated(tmp: Path):
-    run = await create_workflow_run(_config(tmp / "trajectory.jsonl"), "run-456")
+
+def test_supergraph_projects_only_retrospective_local_state_to_its_llm():
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(_keep_llm_context_local(Path(tmp)))
+
+
+async def _keep_llm_context_local(tmp: Path):
+    llm = _ScriptedLlm()
+    run = await create_workflow_run(
+        _config(tmp / "trajectory.jsonl"),
+        "run-456",
+        WorkflowDependencies(retrospective_llm=llm, retrospective_model="test-model"),
+    )
     try:
-        await run.record_phase_context(WorkflowPhase.DISCOVERY, ["Create an account."])
-        await run.record_phase_context(
-            WorkflowPhase.SOLVE_TASK,
-            ["NVDA announced: Create account button."],
-            task_number=1,
+        await run.invoke(
+            {
+                "task_pipelines": [
+                    {
+                        "task": _task(),
+                        "solve_task_state": {
+                            "history": [
+                                * _solve_history(),
+                                {
+                                    "origin": MessageOrigin.TOOL,
+                                    "name": "devtools_only",
+                                    "content": "Must not be passed to retrospective.",
+                                    "reference_id": "devtools-1",
+                                },
+                            ]
+                        },
+                        "retrospective_state": {"history": [], "candidates": []},
+                        "verification_state": {"foreign": "Must not enter the prompt."},
+                        "final_result_state": {"foreign": "Must not enter the prompt."},
+                    }
+                ]
+            }
         )
-        await run.record_phase_context(
-            WorkflowPhase.VERIFY,
-            ["NVDA announced the confirmation message."],
-            task_number=1,
-            candidate_reference=3,
-        )
-        assert await run.phase_context(WorkflowPhase.DISCOVERY) == ["Create an account."]
-        assert await run.phase_context(WorkflowPhase.SOLVE_TASK, task_number=1) == [
-            "NVDA announced: Create account button."
-        ]
-        assert await run.phase_context(WorkflowPhase.VERIFY, task_number=1, candidate_reference=3) == [
-            "NVDA announced the confirmation message."
-        ]
-        assert run.provenance == [
-            {"run_id": "run-456", "phase": "discovery", "task_number": None, "candidate_reference": None},
-            {"run_id": "run-456", "phase": "solve_task", "task_number": 1, "candidate_reference": None},
-            {"run_id": "run-456", "phase": "verify", "task_number": 1, "candidate_reference": 3},
-        ]
     finally:
         await run.close()
 
-
-async def _resume_from_metadata(tmp: Path):
-    run = await create_workflow_run(_config(tmp / "trajectory.jsonl"), "run-789")
-    try:
-        await run.record_phase_context(WorkflowPhase.DISCOVERY, ["Browse products."])
-        resumed = await resume_workflow_run_from_metadata(run.metadata_path)
-        try:
-            assert run.metadata_path.exists()
-            assert resumed.checkpoint_id == "run-789"
-            assert resumed.checkpoint_path == run.checkpoint_path
-            assert await resumed.phase_context(WorkflowPhase.DISCOVERY) == ["Browse products."]
-        finally:
-            await resumed.close()
-    finally:
-        await run.close()
+    prompt = llm.histories[0][0]["content"]
+    assert "Must not be passed" in prompt
+    assert "foreign" not in prompt
+    assert "task_pipelines" not in prompt
 
 
-async def _use_configured_resume_checkpoint_path(tmp: Path):
-    checkpoint_path = tmp / "resume.sqlite"
-    config = _config(tmp / "trajectory.jsonl", resume_path=str(checkpoint_path))
-    run = await create_workflow_run(config, "run-resume")
-    try:
-        assert run.checkpoint_path == checkpoint_path.resolve()
-        assert run.metadata_path == (tmp / "resume.metadata.json").resolve()
-    finally:
-        await run.close()
+def _task():
+    return {"number": 1, "url": "https://shop.example/", "description": "Purchase a product."}
 
 
-async def _keep_task_contexts_and_provenance(tmp: Path):
-    run = await create_workflow_run(_config(tmp / "trajectory.jsonl"), "run-101")
-    try:
-        await run.record_phase_context(WorkflowPhase.SOLVE_TASK, ["Task one."], task_number=1)
-        await run.record_phase_context(WorkflowPhase.SOLVE_TASK, ["Task two."], task_number=2)
-        assert await run.phase_context(WorkflowPhase.SOLVE_TASK, task_number=1) == ["Task one."]
-        assert await run.phase_context(WorkflowPhase.SOLVE_TASK, task_number=2) == ["Task two."]
-        assert [json.loads(line) for line in run.provenance_path.read_text(encoding="utf-8").splitlines()] == [
-            {"run_id": "run-101", "phase": "solve_task", "task_number": 1, "candidate_reference": None},
-            {"run_id": "run-101", "phase": "solve_task", "task_number": 2, "candidate_reference": None},
-        ]
-    finally:
-        await run.close()
+def _solve_history():
+    return [
+        {
+            "origin": MessageOrigin.TOOL,
+            "name": "read_speech",
+            "content": "No confirmation followed submission.",
+            "reference_id": "speech-1",
+        }
+    ]
 
 
-def _config(trajectory_path: Path, resume_path: str | None = None) -> RunConfig:
+def _config(trajectory_path: Path) -> RunConfig:
     return RunConfig(
-        application_url="http://application.test",
+        application_url="https://shop.example/",
         task=None,
         model="test-model",
-        openai_base_url="http://inference.test",
-        openai_api_key="secret",
-        nvda_mcp_url="http://nvda.test/mcp",
+        openai_base_url="https://llm.example/",
+        openai_api_key="key",
+        nvda_mcp_url="http://nvda.example/mcp",
         trajectory_path=str(trajectory_path),
-        resume_path=resume_path,
     )
 
 

@@ -72,7 +72,6 @@ def test_retrospect_returns_only_briefed_candidates_from_one_completion():
 
     assert candidates == [
         {
-            "task_number": 1,
             "description": "The confirmation might not be announced.",
             "verification_brief": "Submit the order and inspect NVDA speech for confirmation.",
         }

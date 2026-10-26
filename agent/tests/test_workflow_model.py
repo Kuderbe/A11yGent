@@ -33,12 +33,11 @@ def test_confirmed_barrier_has_actionable_observed_fields():
 
 def test_candidate_and_outcome_status_distinguish_unverified_reasons():
     candidate: Candidate = {
-        "task_number": 2,
         "description": "Error feedback may not be announced.",
         "verification_brief": "Submit the empty form and inspect the feedback.",
     }
 
-    assert candidate["task_number"] == 2
+    assert candidate["description"] == "Error feedback may not be announced."
     assert VerificationOutcomeStatus.UNVERIFIED_BUDGET_EXHAUSTED.value == "unverified_budget_exhausted"
     assert VerificationOutcomeStatus.UNVERIFIED_EXECUTION_ERROR.value == "unverified_execution_error"
 
