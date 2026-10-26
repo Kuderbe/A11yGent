@@ -3,18 +3,23 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated
 
 import aiosqlite
-from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 
 from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.config import RunConfig
-from a11y_gent.model.workflow_runtime import TaskPipelineState, WorkflowRuntimeState
+from a11y_gent.model.workflow_runtime import (
+    RetrospectiveSubstate,
+    WorkflowRuntimeState,
+    replace_retrospective_states,
+)
 from a11y_gent.prompts import make_retrospective_completion_tool
-from a11y_gent.task_retrospective import build_retrospective_graph, initial_retrospective_state
+from a11y_gent.task_retrospective import RetrospectiveState, build_retrospective_graph
 
 
 @dataclass(frozen=True)
@@ -99,49 +104,53 @@ async def resume_workflow_run(
 
 
 def build_workflow_supergraph(dependencies: WorkflowDependencies, checkpointer: AsyncSqliteSaver):
-    """Build phase wrappers around child graphs that inherit ``checkpointer``."""
+    """Build the supergraph with embedded phase graphs and one checkpoint owner."""
     graph = StateGraph(WorkflowRuntimeState)
-    graph.add_node("retrospective", _retrospective_wrapper(dependencies))
-    graph.add_edge(START, "retrospective")
+    graph.add_node("retrospective", _retrospective_subgraph(dependencies))
+    graph.add_conditional_edges(START, _retrospective_sends, ["retrospective"])
     graph.add_edge("retrospective", END)
     return graph.compile(checkpointer=checkpointer)
 
 
-def _retrospective_wrapper(dependencies: WorkflowDependencies):
+def _retrospective_sends(state: WorkflowRuntimeState) -> list[Send]:
+    return [
+        Send("retrospective", retrospective_state)
+        for retrospective_state in state["retrospective_states"]
+        if not retrospective_state["candidates"]
+    ]
+
+
+def _retrospective_subgraph(dependencies: WorkflowDependencies):
     child_graph = build_retrospective_graph(
         dependencies.retrospective_llm,
         make_retrospective_completion_tool(),
         dependencies.retrospective_model,
     )
-
-    async def retrospect_pipelines(
-        state: WorkflowRuntimeState, config: RunnableConfig
-    ) -> WorkflowRuntimeState:
-        pipelines = [
-            await _retrospect_pipeline(pipeline, child_graph, config)
-            for pipeline in state["task_pipelines"]
-        ]
-        return {"task_pipelines": pipelines}
-
-    return retrospect_pipelines
+    adapter = StateGraph(RetrospectiveSubgraphState)
+    adapter.add_node("phase", child_graph)
+    adapter.add_node("collect", _collect_retrospective_state)
+    adapter.add_edge(START, "phase")
+    adapter.add_edge("phase", "collect")
+    adapter.add_edge("collect", END)
+    return adapter.compile()
 
 
-async def _retrospect_pipeline(
-    pipeline: TaskPipelineState, child_graph, config: RunnableConfig
-) -> TaskPipelineState:
-    retrospective_state = pipeline["retrospective_state"]
-    if retrospective_state["candidates"]:
-        return pipeline
-    state = await child_graph.ainvoke(
-        initial_retrospective_state(pipeline["task"], pipeline["solve_task_state"]["history"]),
-        config,
-    )
+class RetrospectiveSubgraphState(RetrospectiveState):
+    """Retrospective state with its supergraph output channel."""
+
+    retrospective_states: Annotated[list[RetrospectiveSubstate], replace_retrospective_states]
+
+
+def _collect_retrospective_state(state: RetrospectiveSubgraphState) -> dict:
     return {
-        **pipeline,
-        "retrospective_state": {
-            "history": state["history"],
-            "candidates": state["candidates"],
-        },
+        "retrospective_states": [
+            {
+                "task": state["task"],
+                "solve_task_history": state["solve_task_history"],
+                "history": state["history"],
+                "candidates": state["candidates"],
+            }
+        ]
     }
 
 
