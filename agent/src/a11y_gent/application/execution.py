@@ -22,7 +22,7 @@ async def execute(config: RunConfig, program: AgentProgram):
         url=config.task["url"],
         goal=config.task["goal"],
         model=config.model,
-        max_steps=config.max_steps,
+        nvda_max_steps=config.nvda_max_steps,
         log_file=str(logger.log_file_path) if logger.log_file_path else None,
     )
     write_started_metadata(config, program, logger.run_id)
@@ -42,7 +42,7 @@ async def execute(config: RunConfig, program: AgentProgram):
                 RunContext(
                     task=config.task,
                     model=config.model,
-                    max_steps=config.max_steps,
+                    max_steps=config.nvda_max_steps,
                     trajectory_path=config.trajectory_path,
                     llm=llm,
                     navigator=navigator,

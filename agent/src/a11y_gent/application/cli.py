@@ -34,9 +34,6 @@ def build_app(program: AgentProgram) -> typer.Typer:
             envvar="A11Y_GENT_MCP_URL",
             help="URL of the NVDA MCP bridge (its tools drive the agent).",
         ),
-        max_steps: int = typer.Option(
-            200, help="Safety net: stop after this many reasoning steps."
-        ),
         discovery_instructions: str | None = typer.Option(
             None, help="Optional guidance and permitted test data for task discovery."
         ),
@@ -46,10 +43,12 @@ def build_app(program: AgentProgram) -> typer.Typer:
             help="URL of the Chrome DevTools MCP endpoint.",
         ),
         discovery_max_steps: int = typer.Option(
-            150, help="Step limit shared by discovery and report enrichment."
+            150,
+            help="Combined DevTools interaction limit for discovery and report enrichment.",
         ),
         nvda_max_steps: int = typer.Option(
-            150, help="Step limit for each task attempt and candidate verification."
+            150,
+            help="Independent NVDA interaction limit for each task attempt and candidate verification.",
         ),
         report_out: str | None = typer.Option(
             None, help="Optional path for the Markdown report."
@@ -72,7 +71,6 @@ def build_app(program: AgentProgram) -> typer.Typer:
             openai_base_url=os.environ["A11Y_GENT_OPENAI_BASE_URL"],
             openai_api_key=os.environ["A11Y_GENT_OPENAI_API_KEY"],
             nvda_mcp_url=nvda_mcp_url,
-            max_steps=max_steps,
             trajectory_path=out,
             log_level=log_level,
             log_file_template=log_file,

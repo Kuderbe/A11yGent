@@ -28,8 +28,9 @@ def test_metadata_records_program_without_api_key():
             openai_base_url="http://endpoint",
             openai_api_key="secret",
             nvda_mcp_url="http://mcp",
-            max_steps=7,
             trajectory_path=trajectory,
+            discovery_max_steps=8,
+            nvda_max_steps=7,
             log_level=LogLevel.INFO,
         )
         path = write_started_metadata(config, _Program(), "run-1")
@@ -39,6 +40,8 @@ def test_metadata_records_program_without_api_key():
     assert record["program_id"] == "test-program-v1"
     assert record["task"] == config.task
     assert record["model"] == {"name": "model", "base_url": "http://endpoint"}
+    assert record["discovery_max_steps"] == 8
+    assert record["nvda_max_steps"] == 7
     assert "secret" not in content
 
 

@@ -80,7 +80,7 @@ def test_cli_builds_config_from_options():
     assert config.openai_base_url == "http://base"
     assert config.openai_api_key == "key"
     assert config.model == "gpt-5-mini"
-    assert config.max_steps == 200
+    assert config.nvda_max_steps == 150
     assert config.log_level is LogLevel.MINIMAL
     assert config.log_file_template is None
 
@@ -130,6 +130,12 @@ def test_cli_requires_url():
     assert result.exit_code != 0
 
 
+def test_cli_rejects_removed_max_steps_option():
+    result, _ = _invoke(["--url", "http://application.test", "--max-steps", "5"])
+    assert result.exit_code != 0
+    assert "No such option: --max-steps" in result.output
+
+
 def test_cli_reads_model_and_nvda_mcp_url_from_env():
     _, config = _invoke(
         ["--url", "http://x", "--goal", "g"],
@@ -147,13 +153,13 @@ def test_cli_options_override_defaults():
         [
             "--url", "http://x",
             "--goal", "g",
-            "--max-steps", "5",
+            "--nvda-max-steps", "5",
             "--out", "t.jsonl",
             "--log-level", "debug",
             "--log-file", "logs/run-<TIMESTAMP>-<RUN_ID>.jsonl",
         ]
     )
-    assert config.max_steps == 5
+    assert config.nvda_max_steps == 5
     assert config.trajectory_path == "t.jsonl"
     assert config.log_level is LogLevel.DEBUG
     assert config.log_file_template == "logs/run-<TIMESTAMP>-<RUN_ID>.jsonl"

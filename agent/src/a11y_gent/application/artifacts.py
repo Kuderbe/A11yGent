@@ -32,7 +32,8 @@ def write_started_metadata(config: RunConfig, program: AgentProgram, run_id: str
             "program_module": type(program).__module__,
             "task": config.task,
             "model": {"name": config.model, "base_url": config.openai_base_url},
-            "max_steps": config.max_steps,
+            "discovery_max_steps": config.discovery_max_steps,
+            "nvda_max_steps": config.nvda_max_steps,
             "agent_git_revision": _git_revision(),
         },
     )
