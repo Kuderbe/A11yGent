@@ -47,7 +47,7 @@ class McpNvdaNavigator:
         await self._call_tool("send_key", {"gesture": "control+a"})
         await self._call_tool(
             "type_text",
-            {"text": f"{_EDGE_EXECUTABLE} {url}", "delay_ms": _TYPE_DELAY_MS},
+            {"text": f"{_EDGE_EXECUTABLE} --new-window {url}", "delay_ms": _TYPE_DELAY_MS},
         )
         await self._call_tool("send_key", {"gesture": "enter"})
         await self._wait_for_load()

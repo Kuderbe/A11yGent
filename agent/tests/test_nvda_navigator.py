@@ -55,7 +55,7 @@ def test_open_launches_edge_waits_for_load_and_moves_to_document_start():
             "type_text",
             {
                 "text": (
-                    "C:\\PROGRA~2\\Microsoft\\Edge\\Application\\msedge.exe "
+                    "C:\\PROGRA~2\\Microsoft\\Edge\\Application\\msedge.exe --new-window "
                     "http://example.test/page"
                 ),
                 "delay_ms": 15,
