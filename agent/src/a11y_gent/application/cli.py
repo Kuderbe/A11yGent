@@ -24,7 +24,7 @@ def build_app(program: AgentProgram) -> typer.Typer:
     @app.command()
     def run(
         url: str = typer.Option(..., help="URL of the page/app under test."),
-        goal: str = typer.Option(..., help="The user story / task to attempt."),
+        goal: str | None = typer.Option(None, help="Optional user task; omitting it runs discovery."),
         success_hint: str | None = typer.Option(
             None, help="Optional note describing what 'done' looks like."
         ),
@@ -34,7 +34,29 @@ def build_app(program: AgentProgram) -> typer.Typer:
             envvar="A11Y_GENT_MCP_URL",
             help="URL of the NVDA MCP bridge (its tools drive the agent).",
         ),
-        max_steps: int = typer.Option(200, help="Safety net: stop after this many reasoning steps."),
+        max_steps: int = typer.Option(
+            200, help="Safety net: stop after this many reasoning steps."
+        ),
+        discovery_instructions: str | None = typer.Option(
+            None, help="Optional guidance and permitted test data for task discovery."
+        ),
+        devtools_mcp_url: str = typer.Option(
+            "http://127.0.0.1:9222/mcp",
+            envvar="A11Y_GENT_DEVTOOLS_MCP_URL",
+            help="URL of the Chrome DevTools MCP endpoint.",
+        ),
+        discovery_max_steps: int = typer.Option(
+            150, help="Step limit shared by discovery and report enrichment."
+        ),
+        nvda_max_steps: int = typer.Option(
+            150, help="Step limit for each task attempt and candidate verification."
+        ),
+        report_out: str | None = typer.Option(
+            None, help="Optional path for the Markdown report."
+        ),
+        resume: str | None = typer.Option(
+            None, help="Optional SQLite checkpoint path to resume."
+        ),
         out: str = typer.Option("trajectory.jsonl", help="Where to write the trajectory JSONL."),
         log_level: LogLevel = typer.Option(
             LogLevel.MINIMAL,
@@ -45,7 +67,7 @@ def build_app(program: AgentProgram) -> typer.Typer:
         ),
     ) -> None:
         config = RunConfig(
-            task=build_task(url, goal, success_hint),
+            task=build_task(url, goal, success_hint) if goal is not None else None,
             model=model,
             openai_base_url=os.environ["A11Y_GENT_OPENAI_BASE_URL"],
             openai_api_key=os.environ["A11Y_GENT_OPENAI_API_KEY"],
@@ -54,6 +76,12 @@ def build_app(program: AgentProgram) -> typer.Typer:
             trajectory_path=out,
             log_level=log_level,
             log_file_template=log_file,
+            discovery_instructions=discovery_instructions,
+            devtools_mcp_url=devtools_mcp_url,
+            discovery_max_steps=discovery_max_steps,
+            nvda_max_steps=nvda_max_steps,
+            report_path=report_out,
+            resume_path=resume,
         )
         result = asyncio.run(execute(config, program))
         print("Verdict:", result["verdict"])

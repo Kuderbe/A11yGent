@@ -85,14 +85,48 @@ def test_cli_builds_config_from_options():
     assert config.log_file_template is None
 
 
+def test_cli_accepts_phased_workflow_configuration():
+    result, config = _invoke(
+        [
+            "--url", "http://application.test",
+            "--goal", "Place an order",
+            "--discovery-instructions", "Use the buyer test account.",
+            "--devtools-mcp-url", "http://devtools.test/mcp",
+            "--discovery-max-steps", "12",
+            "--nvda-max-steps", "34",
+            "--report-out", "report.md",
+            "--resume", "checkpoints/run-1.sqlite",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    assert config.task == {"url": "http://application.test", "goal": "Place an order"}
+    assert config.discovery_instructions == "Use the buyer test account."
+    assert config.devtools_mcp_url == "http://devtools.test/mcp"
+    assert config.discovery_max_steps == 12
+    assert config.nvda_max_steps == 34
+    assert config.report_path == "report.md"
+    assert config.resume_path == "checkpoints/run-1.sqlite"
+
+
+def test_cli_allows_discovery_without_a_goal():
+    result, config = _invoke(["--url", "http://application.test"])
+    assert result.exit_code == 0, result.output
+    assert config.task is None
+    assert config.discovery_instructions is None
+    assert config.discovery_max_steps == 150
+    assert config.nvda_max_steps == 150
+    assert config.report_path is None
+    assert config.resume_path is None
+
+
 def test_cli_does_not_require_browser_mcp_options():
     result, config = _invoke(["--url", "http://x", "--goal", "g"])
     assert result.exit_code == 0, result.output
     assert config.nvda_mcp_url == "http://192.168.64.4:8765/mcp"
 
 
-def test_cli_requires_url_and_goal():
-    result, _ = _invoke(["--url", "http://x"])
+def test_cli_requires_url():
+    result, _ = _invoke([])
     assert result.exit_code != 0
 
 

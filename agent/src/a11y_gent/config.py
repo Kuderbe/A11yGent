@@ -13,7 +13,7 @@ from a11y_gent.observability import LogLevel
 
 @dataclass(frozen=True)
 class RunConfig:
-    task: Task
+    task: Task | None
     model: str
     openai_base_url: str
     openai_api_key: str
@@ -22,6 +22,12 @@ class RunConfig:
     trajectory_path: str
     log_level: LogLevel = LogLevel.MINIMAL
     log_file_template: str | None = None
+    discovery_instructions: str | None = None
+    devtools_mcp_url: str = "http://127.0.0.1:9222/mcp"
+    discovery_max_steps: int = 150
+    nvda_max_steps: int = 150
+    report_path: str | None = None
+    resume_path: str | None = None
 
 
 def build_task(url: str, goal: str, success_hint: str | None) -> Task:
