@@ -6,6 +6,20 @@ from typing import NotRequired, TypedDict
 from a11y_gent.model.verdict import Barrier
 
 
+class WorkflowPhase(Enum):
+    """A stage in the task-assessment workflow."""
+
+    DISCOVERY = "discovery"
+    SOLVE_TASK = "solve_task"
+    RETROSPECTIVE = "retrospective"
+    VERIFY = "verify"
+    GATHER_INFO_FOR_REPORT = "gather_info_for_report"
+    WRITE_REPORT = "write_report"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 class WorkflowTask(TypedDict):
     """One numbered task selected for assessment."""
 
