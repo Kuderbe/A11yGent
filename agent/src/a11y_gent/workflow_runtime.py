@@ -1,10 +1,11 @@
 """Durable phase-local state for the task-assessment workflow."""
 
 import json
-import sqlite3
 from pathlib import Path
 
-from langgraph.checkpoint.sqlite import SqliteSaver
+import aiosqlite
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 
 from a11y_gent.config import RunConfig
@@ -15,14 +16,24 @@ from a11y_gent.model.workflow_runtime import WorkflowProvenance, WorkflowRuntime
 class WorkflowRun:
     """A checkpointed workflow run with isolated contexts for each phase."""
 
-    def __init__(self, checkpoint_path: Path, checkpoint_id: str):
+    def __init__(
+        self,
+        checkpoint_path: Path,
+        checkpoint_id: str,
+        connection: aiosqlite.Connection,
+    ):
         self.checkpoint_path = checkpoint_path.resolve()
         self.checkpoint_id = checkpoint_id
-        self._connection = sqlite3.connect(self.checkpoint_path, check_same_thread=False)
-        self._checkpointer = SqliteSaver(self._connection)
+        self._connection = connection
+        self._checkpointer = AsyncSqliteSaver(
+            self._connection,
+            serde=JsonPlusSerializer(
+                allowed_msgpack_modules=[("a11y_gent.model.message", "MessageOrigin")]
+            ),
+        )
         self._graph = _build_graph(self._checkpointer)
 
-    def record_phase_context(
+    async def record_phase_context(
         self,
         phase: WorkflowPhase,
         context: object,
@@ -30,7 +41,7 @@ class WorkflowRun:
         candidate_reference: int | None = None,
     ) -> None:
         """Persist one phase-local context and its chronological provenance."""
-        values = self._state_values()
+        values = await self._state_values()
         input_state: WorkflowRuntimeState = {
             "phase_contexts": values["phase_contexts"],
             "pending_phase": phase.value,
@@ -38,17 +49,17 @@ class WorkflowRun:
             "pending_task_number": task_number,
             "pending_candidate_reference": candidate_reference,
         }
-        self._graph.invoke(input_state, self.thread_config)
+        await self._graph.ainvoke(input_state, self.thread_config)
         self._append_provenance(phase, task_number, candidate_reference)
 
-    def phase_context(
+    async def phase_context(
         self,
         phase: WorkflowPhase,
         task_number: int | None = None,
         candidate_reference: int | None = None,
     ) -> object | None:
         """Return only the context persisted for ``phase``."""
-        return self._state_values()["phase_contexts"].get(
+        return (await self._state_values())["phase_contexts"].get(
             _context_key(phase.value, task_number, candidate_reference)
         )
 
@@ -68,6 +79,20 @@ class WorkflowRun:
         return {"configurable": {"thread_id": self.checkpoint_id}}
 
     @property
+    def checkpointer(self) -> AsyncSqliteSaver:
+        """Return the SQLite checkpointer shared by workflow stages."""
+        return self._checkpointer
+
+    def phase_thread_config(self, phase: WorkflowPhase) -> dict:
+        """Return the checkpoint identity for one isolated workflow stage."""
+        return {
+            "configurable": {
+                "thread_id": self.checkpoint_id,
+                "checkpoint_ns": phase.value,
+            }
+        }
+
+    @property
     def metadata_path(self) -> Path:
         """Return the non-secret resume metadata path for this run."""
         return self.checkpoint_path.with_name(f"{self.checkpoint_path.stem}.metadata.json")
@@ -77,12 +102,12 @@ class WorkflowRun:
         """Return the append-only chronological provenance log path."""
         return self.checkpoint_path.with_name(f"{self.checkpoint_path.stem}.provenance.jsonl")
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close the SQLite connection backing this run."""
-        self._connection.close()
+        await self._connection.close()
 
-    def _state_values(self) -> WorkflowRuntimeState:
-        snapshot = self._graph.get_state(self.thread_config)
+    async def _state_values(self) -> WorkflowRuntimeState:
+        snapshot = await self._graph.aget_state(self.thread_config)
         if snapshot.values:
             return snapshot.values
         return {"phase_contexts": {}, "pending_phase": "", "pending_context": None,
@@ -104,11 +129,12 @@ class WorkflowRun:
             handle.write(json.dumps(record) + "\n")
 
 
-def create_workflow_run(config: RunConfig, run_id: str) -> WorkflowRun:
+async def create_workflow_run(config: RunConfig, run_id: str) -> WorkflowRun:
     """Create a new run with a stable checkpoint identity derived from ``run_id``."""
     checkpoint_path = Path(config.resume_path) if config.resume_path else _checkpoint_path(config)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    run = WorkflowRun(checkpoint_path, run_id)
+    connection = await aiosqlite.connect(checkpoint_path)
+    run = WorkflowRun(checkpoint_path, run_id, connection)
     run.metadata_path.write_text(
         json.dumps(
             {
@@ -123,15 +149,16 @@ def create_workflow_run(config: RunConfig, run_id: str) -> WorkflowRun:
     return run
 
 
-def resume_workflow_run(checkpoint_path: str | Path, checkpoint_id: str) -> WorkflowRun:
+async def resume_workflow_run(checkpoint_path: str | Path, checkpoint_id: str) -> WorkflowRun:
     """Reopen a run's SQLite checkpoint by its persisted identity."""
-    return WorkflowRun(Path(checkpoint_path), checkpoint_id)
+    path = Path(checkpoint_path)
+    return WorkflowRun(path, checkpoint_id, await aiosqlite.connect(path))
 
 
-def resume_workflow_run_from_metadata(metadata_path: str | Path) -> WorkflowRun:
+async def resume_workflow_run_from_metadata(metadata_path: str | Path) -> WorkflowRun:
     """Reopen the workflow run identified by non-secret resume metadata."""
     metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
-    return resume_workflow_run(metadata["checkpoint_path"], metadata["checkpoint_id"])
+    return await resume_workflow_run(metadata["checkpoint_path"], metadata["checkpoint_id"])
 
 
 def _checkpoint_path(config: RunConfig) -> Path:
@@ -139,7 +166,7 @@ def _checkpoint_path(config: RunConfig) -> Path:
     return trajectory_path.with_name(f"{trajectory_path.stem}.workflow.sqlite")
 
 
-def _build_graph(checkpointer: SqliteSaver):
+def _build_graph(checkpointer: AsyncSqliteSaver):
     graph = StateGraph(WorkflowRuntimeState)
     graph.add_node("record_phase_context", _record_phase_context)
     graph.add_edge(START, "record_phase_context")

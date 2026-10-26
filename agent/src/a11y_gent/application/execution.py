@@ -16,6 +16,7 @@ from a11y_gent.task_selection import select_cli_tasks
 from a11y_gent.tooling.barrier import make_barrier_tool
 from a11y_gent.tooling.phase_tools import tools_for_phase
 from a11y_gent.tooling.verdict import make_verdict_tool
+from a11y_gent.workflow_runtime import create_workflow_run
 from mcp import Client
 
 
@@ -37,7 +38,7 @@ async def execute(config: RunConfig, program: AgentProgram):
         await _validate_mcp_endpoint("Chrome DevTools", config.devtools_mcp_url)
         selected_tasks = select_cli_tasks(config)
         if not selected_tasks:
-            selected_tasks = await _discover_tasks(config)
+            selected_tasks = await _discover_tasks(config, logger.run_id)
         task = _program_task(selected_tasks[0], config)
         observability.navigating()
         observability.info(
@@ -96,7 +97,7 @@ def _program_task(selected_task: WorkflowTask, config: RunConfig) -> Task:
     return task
 
 
-async def _discover_tasks(config: RunConfig) -> list[WorkflowTask]:
+async def _discover_tasks(config: RunConfig, run_id: str) -> list[WorkflowTask]:
     async with Client(config.devtools_mcp_url) as devtools_session:
         devtools_tools = await register_mcp_tools(devtools_session)
         llm = OpenaiLlmClient(
@@ -108,4 +109,17 @@ async def _discover_tasks(config: RunConfig) -> list[WorkflowTask]:
             ],
             additional_headers_for(config.openai_base_url),
         )
-        return await discover_tasks(config, llm)
+        workflow_run = await create_workflow_run(config, run_id)
+        try:
+            discovery = await discover_tasks(
+                config,
+                llm,
+                workflow_run,
+                [
+                    *tools_for_phase(WorkflowPhase.DISCOVERY, [], devtools_tools),
+                    make_discovery_completion_tool(),
+                ],
+            )
+            return discovery.tasks
+        finally:
+            await workflow_run.close()

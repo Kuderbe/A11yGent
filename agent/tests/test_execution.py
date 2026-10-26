@@ -195,7 +195,7 @@ def test_execution_uses_discovered_task_when_no_cli_task_is_supplied():
     async def _validate(endpoint_name, url):
         return None
 
-    async def _discover(config):
+    async def _discover(config, run_id):
         return [
             {
                 "number": 1,

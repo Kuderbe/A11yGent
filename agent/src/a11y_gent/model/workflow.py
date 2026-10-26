@@ -1,5 +1,6 @@
 """Domain representations shared by phases of the task-assessment workflow."""
 
+from dataclasses import dataclass
 from enum import Enum
 from typing import NotRequired, TypedDict
 
@@ -26,6 +27,14 @@ class WorkflowTask(TypedDict):
     number: int
     url: str
     description: str
+
+
+@dataclass(frozen=True)
+class DiscoveryResult:
+    """Tasks found during discovery and whether its inventory is incomplete."""
+
+    tasks: list[WorkflowTask]
+    incomplete: bool
 
 
 class Candidate(TypedDict):
