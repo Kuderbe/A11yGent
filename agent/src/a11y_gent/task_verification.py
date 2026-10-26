@@ -43,8 +43,9 @@ async def verify_candidate(
 ) -> VerificationOutcome:
     """Verify one candidate through a fresh NVDA-only interaction loop."""
     graph = build_verification_graph(
-        config,
         llm,
+        config.model,
+        config.nvda_max_steps,
         [*nvda_tools, make_verify_completion_tool()],
     )
     state = await graph.ainvoke(initial_verification_state(task, candidate_reference, candidate))
@@ -57,15 +58,15 @@ async def verify_candidate(
     }
 
 
-def build_verification_graph(config: RunConfig, llm: LlmClient, tools: list[Tool]):
+def build_verification_graph(llm: LlmClient, model: str, max_steps: int, tools: list[Tool]):
     graph = StateGraph(VerificationState)
-    graph.add_node("reason", _reason_node(llm, config.model))
-    graph.add_node("act", _act_node(llm, config.model))
+    graph.add_node("reason", _reason_node(llm, model))
+    graph.add_node("act", _act_node(llm, model))
     graph.add_node("observe", _observe_node(llm, tools))
     graph.add_edge(START, "reason")
     graph.add_edge("reason", "act")
     graph.add_conditional_edges("act", _after_act, {"observe": "observe", "reason": "reason"})
-    graph.add_conditional_edges("observe", _after_observe(config.nvda_max_steps), {"reason": "reason", "done": END})
+    graph.add_conditional_edges("observe", _after_observe(max_steps), {"reason": "reason", "done": END})
     return graph.compile()
 
 

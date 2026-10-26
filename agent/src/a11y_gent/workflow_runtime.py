@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from operator import add
 from pathlib import Path
 from typing import Annotated
 
@@ -15,11 +16,18 @@ from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.config import RunConfig
 from a11y_gent.model.workflow_runtime import (
     RetrospectiveSubstate,
+    VerificationSubstate,
     WorkflowRuntimeState,
     replace_retrospective_states,
 )
-from a11y_gent.prompts import make_retrospective_completion_tool
+from a11y_gent.model.tool import Tool
+from a11y_gent.prompts import make_retrospective_completion_tool, make_verify_completion_tool
 from a11y_gent.task_retrospective import RetrospectiveState, build_retrospective_graph
+from a11y_gent.task_verification import (
+    VerificationState,
+    build_verification_graph,
+    initial_verification_state,
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +36,10 @@ class WorkflowDependencies:
 
     retrospective_llm: LlmClient
     retrospective_model: str
+    verification_llm: LlmClient
+    verification_model: str
+    nvda_tools: list[Tool]
+    nvda_max_steps: int
 
 
 class WorkflowRun:
@@ -46,7 +58,10 @@ class WorkflowRun:
         self._checkpointer = AsyncSqliteSaver(
             self._connection,
             serde=JsonPlusSerializer(
-                allowed_msgpack_modules=[("a11y_gent.model.message", "MessageOrigin")]
+                allowed_msgpack_modules=[
+                    ("a11y_gent.model.message", "MessageOrigin"),
+                    ("a11y_gent.model.workflow", "VerificationOutcomeStatus"),
+                ]
             ),
         )
         self._graph = build_workflow_supergraph(dependencies, self._checkpointer)
@@ -107,8 +122,10 @@ def build_workflow_supergraph(dependencies: WorkflowDependencies, checkpointer: 
     """Build the supergraph with embedded phase graphs and one checkpoint owner."""
     graph = StateGraph(WorkflowRuntimeState)
     graph.add_node("retrospective", _retrospective_subgraph(dependencies))
-    graph.add_conditional_edges(START, _retrospective_sends, ["retrospective"])
-    graph.add_edge("retrospective", END)
+    graph.add_node("verification", _verification_subgraph(dependencies))
+    graph.add_conditional_edges(START, _initial_sends, ["retrospective", "verification"])
+    graph.add_conditional_edges("retrospective", _verification_sends, ["verification", END])
+    graph.add_conditional_edges("verification", _verification_sends, ["verification", END])
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -116,8 +133,13 @@ def _retrospective_sends(state: WorkflowRuntimeState) -> list[Send]:
     return [
         Send("retrospective", retrospective_state)
         for retrospective_state in state["retrospective_states"]
-        if not retrospective_state["candidates"]
+        if not _retrospective_completed(retrospective_state)
     ]
+
+
+def _initial_sends(state: WorkflowRuntimeState) -> list[Send]:
+    retrospective_sends = _retrospective_sends(state)
+    return retrospective_sends or _verification_sends(state)
 
 
 def _retrospective_subgraph(dependencies: WorkflowDependencies):
@@ -135,10 +157,58 @@ def _retrospective_subgraph(dependencies: WorkflowDependencies):
     return adapter.compile()
 
 
+def _verification_sends(state: WorkflowRuntimeState) -> list[Send]:
+    completed = {
+        (verification["task"]["number"], verification["candidate_reference"])
+        for verification in state["verification_states"]
+    }
+    for retrospective_state in sorted(state["retrospective_states"], key=lambda state: state["task"]["number"]):
+        task = retrospective_state["task"]
+        for candidate_reference, candidate in enumerate(retrospective_state["candidates"]):
+            if (task["number"], candidate_reference) not in completed:
+                return [
+                    Send(
+                        "verification",
+                        initial_verification_state(task, candidate_reference, candidate),
+                    )
+                ]
+    return []
+
+
+def _retrospective_completed(state: RetrospectiveSubstate) -> bool:
+    return any(
+        call["tool"]["name"] == "complete_retrospective"
+        for message in state["history"]
+        for call in message.get("tool_calls", [])
+    )
+
+
+def _verification_subgraph(dependencies: WorkflowDependencies):
+    child_graph = build_verification_graph(
+        dependencies.verification_llm,
+        dependencies.verification_model,
+        dependencies.nvda_max_steps,
+        [*dependencies.nvda_tools, make_verify_completion_tool()],
+    )
+    adapter = StateGraph(VerificationSubgraphState)
+    adapter.add_node("phase", child_graph)
+    adapter.add_node("collect", _collect_verification_state)
+    adapter.add_edge(START, "phase")
+    adapter.add_edge("phase", "collect")
+    adapter.add_edge("collect", END)
+    return adapter.compile()
+
+
 class RetrospectiveSubgraphState(RetrospectiveState):
     """Retrospective state with its supergraph output channel."""
 
     retrospective_states: Annotated[list[RetrospectiveSubstate], replace_retrospective_states]
+
+
+class VerificationSubgraphState(VerificationState):
+    """Verification state with its supergraph output channel."""
+
+    verification_states: Annotated[list[VerificationSubstate], add]
 
 
 def _collect_retrospective_state(state: RetrospectiveSubgraphState) -> dict:
@@ -150,6 +220,22 @@ def _collect_retrospective_state(state: RetrospectiveSubgraphState) -> dict:
                 "history": state["history"],
                 "candidates": state["candidates"],
             }
+        ]
+    }
+
+
+def _collect_verification_state(state: VerificationSubgraphState) -> dict:
+    if state["outcome"] is None:
+        raise RuntimeError("Verification must produce an outcome before collection")
+    return {
+        "verification_states": [
+            {
+                "task": state["task"],
+                "candidate_reference": state["candidate_reference"],
+                "candidate": state["candidate"],
+                "history": state["history"],
+                "outcome": state["outcome"],
+            },
         ]
     }
 

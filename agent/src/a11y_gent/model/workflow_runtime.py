@@ -1,5 +1,6 @@
 """Checkpointed superstate for phased workflow execution."""
 
+from operator import add
 from typing import Annotated, TypedDict
 
 from a11y_gent.model.message import Message
@@ -48,5 +49,5 @@ class WorkflowRuntimeState(TypedDict):
     discovery_state: dict[str, object]
     solve_states: list[SolveTaskSubstate]
     retrospective_states: Annotated[list[RetrospectiveSubstate], replace_retrospective_states]
-    verification_states: list[VerificationSubstate]
+    verification_states: Annotated[list[VerificationSubstate], add]
     final_result_states: list[dict[str, object]]
