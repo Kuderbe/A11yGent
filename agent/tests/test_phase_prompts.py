@@ -46,6 +46,11 @@ def test_solve_task_prompt_uses_only_the_task_and_reports_observed_barriers():
     assert "https://shop.example/" in prompt
     assert "NVDA" in prompt
     assert "report_barrier" in prompt
+    assert "description" in prompt
+    assert "expected behavior" in prompt
+    assert "actual behavior" in prompt
+    assert "executed reproduction steps" in prompt
+    assert "evidence" in prompt
     assert "complete_solve_task" in prompt
     assert "DevTools" not in prompt
 
