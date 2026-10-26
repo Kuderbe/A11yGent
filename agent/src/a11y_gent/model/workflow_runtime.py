@@ -3,7 +3,7 @@
 from typing import Annotated, TypedDict
 
 from a11y_gent.model.message import Message
-from a11y_gent.model.workflow import Candidate, WorkflowTask
+from a11y_gent.model.workflow import Candidate, VerificationOutcome, WorkflowTask
 
 
 class SolveTaskSubstate(TypedDict):
@@ -22,6 +22,16 @@ class RetrospectiveSubstate(TypedDict):
     candidates: list[Candidate]
 
 
+class VerificationSubstate(TypedDict):
+    """State retained for one candidate verification."""
+
+    task: WorkflowTask
+    candidate_reference: int
+    candidate: Candidate
+    history: list[Message]
+    outcome: VerificationOutcome
+
+
 def replace_retrospective_states(
     current: list[RetrospectiveSubstate], updates: list[RetrospectiveSubstate]
 ) -> list[RetrospectiveSubstate]:
@@ -38,5 +48,5 @@ class WorkflowRuntimeState(TypedDict):
     discovery_state: dict[str, object]
     solve_states: list[SolveTaskSubstate]
     retrospective_states: Annotated[list[RetrospectiveSubstate], replace_retrospective_states]
-    verification_states: list[dict[str, object]]
+    verification_states: list[VerificationSubstate]
     final_result_states: list[dict[str, object]]

@@ -101,23 +101,32 @@ def build_verify_prompt(task: WorkflowTask, candidate_reference: int, candidate:
         f"Candidate {candidate_reference}: {candidate['description']}\n"
         f"Verification brief: {candidate['verification_brief']}\n\n"
         "Do not investigate unrelated conditions. Complete by calling "
-        "complete_verification with confirmed, discarded, or unverified status and "
-        "the supporting evidence."
+        "complete_verification with confirmed or discarded status and supporting "
+        "NVDA evidence."
     )
 
 
 def make_verify_completion_tool() -> Tool:
     """Build the structured completion sink for one candidate verification."""
 
-    def complete_verification(status: str, evidence: str) -> str:
+    def complete_verification(
+        status: str,
+        evidence: str,
+        description: str = "",
+        expected_behavior: str = "",
+        actual_behavior: str = "",
+        reproduction_steps: list | None = None,
+    ) -> str:
         """Record the conclusion and supporting evidence for one candidate."""
         return "verification completed"
 
     return Tool(
         name="complete_verification",
         description=(
-            "Complete verification with status 'confirmed', 'discarded', or an "
-            "unverified status and supporting evidence."
+            "Complete verification with status 'confirmed' or 'discarded' and "
+            "supporting NVDA evidence. A confirmed outcome must "
+            "also provide the barrier description, expected behavior, actual behavior, "
+            "executed reproduction steps, and NVDA evidence."
         ),
         tool_function=complete_verification,
     )

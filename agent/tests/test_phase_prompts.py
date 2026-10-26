@@ -110,9 +110,21 @@ def test_verify_prompt_receives_only_task_candidate_and_brief():
 
     tool = make_verify_completion_tool()
     assert tool["tool_function"](
-        status="discarded", evidence="NVDA announces the confirmation."
+        status="confirmed",
+        evidence="Speech: no confirmation after submission.",
+        description="The confirmation is not announced.",
+        expected_behavior="NVDA announces the confirmation.",
+        actual_behavior="NVDA announces no confirmation.",
+        reproduction_steps=["Submit the form."],
     ) == "verification completed"
-    assert _schema_properties(tool) == {"status", "evidence"}
+    assert _schema_properties(tool) == {
+        "status",
+        "evidence",
+        "description",
+        "expected_behavior",
+        "actual_behavior",
+        "reproduction_steps",
+    }
 
 
 def test_report_enrichment_prompt_cannot_change_the_confirmed_barrier():
