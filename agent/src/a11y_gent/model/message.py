@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import NotRequired, TypedDict
 
-from a11y_gent.model.tool_call import ToolCall
+from a11y_gent.model.tool_call import SerializedToolCall
 
 
 
@@ -19,6 +19,6 @@ class Message(TypedDict):
     content: str
     name: str
     reference_id: NotRequired[str]
-    tool_calls: NotRequired[list[ToolCall]]
+    tool_calls: NotRequired[list[SerializedToolCall]]
 
 

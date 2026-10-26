@@ -9,7 +9,7 @@ from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.config import RunConfig
 from a11y_gent.model.message import Message, MessageOrigin
 from a11y_gent.model.tool import Tool
-from a11y_gent.model.tool_call import ToolCall
+from a11y_gent.model.tool_call import ToolCall, serialize_tool_call
 from a11y_gent.model.workflow import DiscoveryResult, WorkflowPhase, WorkflowTask
 from a11y_gent.prompts import build_discovery_prompt
 from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
@@ -91,7 +91,7 @@ def _act_node(llm: LlmClient, model: str):
         response = await llm.infer(state["history"], model)
         return {
             **state,
-            "history": [*state["history"], _without_tool_calls(response["message"])],
+            "history": [*state["history"], _action_message(response["message"], response.get("tool_calls", []))],
             "pending_tool_calls": [_serialize_tool_call(call) for call in response.get("tool_calls", [])],
             "step_count": state["step_count"] + 1,
         }
@@ -142,8 +142,11 @@ def _after_observe(max_steps: int):
     return continue_or_stop
 
 
-def _without_tool_calls(message: Message) -> Message:
-    return {key: value for key, value in message.items() if key != "tool_calls"}
+def _action_message(message: Message, tool_calls: list[ToolCall]) -> Message:
+    return {
+        **{key: value for key, value in message.items() if key != "tool_calls"},
+        "tool_calls": [serialize_tool_call(tool_call) for tool_call in tool_calls],
+    }
 
 
 def _serialize_tool_call(tool_call: ToolCall) -> DiscoveryToolCall:

@@ -2,7 +2,7 @@ from a11y_gent.adaptor.llm_response import LlmResponse
 from a11y_gent.model.message import Message, MessageOrigin
 from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.model.tool import Tool
-from a11y_gent.model.tool_call import ToolCall
+from a11y_gent.model.tool_call import ToolCall, serialize_tool_call
 from collections.abc import Callable
 import inspect
 import json
@@ -104,7 +104,7 @@ class OpenaiLlmClient(LlmClient):
                 self._convert_tool_call(tool_call.id, tool_call.function.name, tool_call.function.arguments)
                 for tool_call in response_message.tool_calls
             ]
-            message["tool_calls"] = tool_calls
+            message["tool_calls"] = [serialize_tool_call(tool_call) for tool_call in tool_calls]
             llm_response["tool_calls"] = tool_calls
 
         return llm_response

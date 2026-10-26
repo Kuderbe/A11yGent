@@ -83,12 +83,17 @@ class WorkflowRun:
         """Return the SQLite checkpointer shared by workflow stages."""
         return self._checkpointer
 
-    def phase_thread_config(self, phase: WorkflowPhase) -> dict:
+    def phase_thread_config(
+        self,
+        phase: WorkflowPhase,
+        task_number: int | None = None,
+        candidate_reference: int | None = None,
+    ) -> dict:
         """Return the checkpoint identity for one isolated workflow stage."""
         return {
             "configurable": {
                 "thread_id": self.checkpoint_id,
-                "checkpoint_ns": phase.value,
+                "checkpoint_ns": _context_key(phase.value, task_number, candidate_reference),
             }
         }
 
