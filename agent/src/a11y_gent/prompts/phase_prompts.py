@@ -93,12 +93,12 @@ def make_retrospective_completion_tool() -> Tool:
     )
 
 
-def build_verify_prompt(task: WorkflowTask, candidate: Candidate) -> str:
+def build_verify_prompt(task: WorkflowTask, candidate_reference: int, candidate: Candidate) -> str:
     """Build the NVDA-only contract for verifying one candidate."""
     return (
         "Use NVDA observations to verify exactly one suspected condition.\n"
         f"Task: {task['description']}\n"
-        f"Candidate {candidate['reference']}: {candidate['description']}\n"
+        f"Candidate {candidate_reference}: {candidate['description']}\n"
         f"Verification brief: {candidate['verification_brief']}\n\n"
         "Do not investigate unrelated conditions. Complete by calling "
         "complete_verification with confirmed, discarded, or unverified status and "
@@ -160,4 +160,11 @@ def make_report_enrichment_completion_tool() -> Tool:
 
 
 def _format_history(history: list[Message]) -> str:
-    return "\n".join(f"{message['name']}: {message['content']}" for message in history)
+    entries: list[str] = []
+    for message in history:
+        entries.append(f"{message['name']}: {message['content']}")
+        entries.extend(
+            f"{call['tool']['name']}: {call['arguments']}"
+            for call in message.get("tool_calls", [])
+        )
+    return "\n".join(entries)

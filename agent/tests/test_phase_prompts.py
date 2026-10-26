@@ -60,10 +60,27 @@ def test_solve_task_prompt_uses_only_the_task_and_reports_observed_barriers():
 
 
 def test_retrospective_prompt_uses_immutable_solve_history_for_candidates_only():
-    prompt = build_retrospective_prompt(_task(), _solve_history())
+    history = [
+        *_solve_history(),
+        {
+            "origin": MessageOrigin.ASSISTANT,
+            "name": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "barrier-1",
+                    "tool": {"name": "report_barrier", "description": ""},
+                    "arguments": {"description": "Submit button has no name."},
+                }
+            ],
+        },
+    ]
+    prompt = build_retrospective_prompt(_task(), history)
 
     assert "Purchase the first product." in prompt
     assert "Submit button announced" in prompt
+    assert "report_barrier" in prompt
+    assert "Submit button has no name." in prompt
     assert "candidates" in prompt
     assert "Do not report a confirmed barrier" in prompt
 
@@ -78,8 +95,8 @@ def test_retrospective_prompt_uses_immutable_solve_history_for_candidates_only()
 def test_verify_prompt_receives_only_task_candidate_and_brief():
     prompt = build_verify_prompt(
         _task(),
+        4,
         {
-            "reference": 4,
             "task_number": 1,
             "description": "The confirmation may not be announced.",
             "verification_brief": "Submit and inspect NVDA speech.",
