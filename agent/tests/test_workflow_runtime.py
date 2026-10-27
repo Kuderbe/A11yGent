@@ -111,6 +111,21 @@ class _VerificationLlm(LlmClient):
         }
 
 
+class _InterruptingVerificationLlm(_VerificationLlm):
+    async def infer(self, history, model, use_tools=True):
+        if use_tools and "second candidate" in history[0]["content"]:
+            raise RuntimeError("interrupted verification")
+        return await super().infer(history, model, use_tools)
+
+
+class _Navigator:
+    def __init__(self):
+        self.opened_urls = []
+
+    async def open(self, url):
+        self.opened_urls.append(url)
+
+
 class _FailIfCalledLlm(LlmClient):
     async def infer(self, history, model, use_tools=True):
         raise AssertionError("No LLM call is allowed for an empty candidate list")
@@ -175,6 +190,11 @@ def test_supergraph_skips_verification_for_completed_empty_candidates():
 def test_supergraph_derives_final_results_after_verification():
     with tempfile.TemporaryDirectory() as tmp:
         asyncio.run(_derive_final_results(Path(tmp)))
+
+
+def test_resume_continues_at_the_first_incomplete_verification():
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(_resume_incomplete_verification(Path(tmp)))
 
 
 async def _verify_candidates_in_local_order(tmp: Path):
@@ -242,6 +262,45 @@ async def _derive_final_results(tmp: Path):
         }
     ]
     assert failed["final_result_states"][0]["verdict"]["status"] is VerdictStatus.FAILED
+
+
+async def _resume_incomplete_verification(tmp: Path):
+    interrupted_llm = _InterruptingVerificationLlm()
+    run = await create_workflow_run(
+        _config(tmp / "trajectory.jsonl"),
+        "run-resume-verification",
+        _dependencies(interrupted_llm),
+    )
+    state = _workflow_state()
+    state["retrospective_states"] = [_completed_retrospective_state([_candidate("first"), _candidate("second")])]
+    try:
+        try:
+            await run.invoke(state)
+        except RuntimeError as error:
+            assert str(error) == "interrupted verification"
+        else:
+            raise AssertionError("The second verification must interrupt the initial run")
+        resumed_llm = _VerificationLlm()
+        navigator = _Navigator()
+        resumed = await resume_workflow_run(
+            run.checkpoint_path,
+            run.checkpoint_id,
+            _dependencies(resumed_llm, navigator=navigator),
+        )
+        try:
+            completed = await resumed.invoke()
+        finally:
+            await resumed.close()
+    finally:
+        await run.close()
+
+    assert navigator.opened_urls == [_task()["url"]]
+    assert interrupted_llm.executed_calls == ["complete_verification"]
+    assert resumed_llm.executed_calls == ["complete_verification"]
+    assert [state["candidate_reference"] for state in completed["verification_states"]] == [0, 1]
+    assert completed["verification_states"][0]["outcome"]["evidence"] == "NVDA disproved first candidate."
+    assert completed["retrospective_states"][0]["candidates"] == [_candidate("first"), _candidate("second")]
+    assert completed["solve_states"] == state["solve_states"]
 
 
 async def _expose_native_retrospective_subgraph_state(tmp: Path):
@@ -408,7 +467,7 @@ def _nvda_tool():
     return {"name": "read_speech", "description": "", "tool_function": lambda: None}
 
 
-def _dependencies(verification_llm=None, retrospective_llm=None):
+def _dependencies(verification_llm=None, retrospective_llm=None, navigator=None):
     return WorkflowDependencies(
         retrospective_llm=retrospective_llm or _ScriptedLlm(),
         retrospective_model="test-model",
@@ -416,6 +475,7 @@ def _dependencies(verification_llm=None, retrospective_llm=None):
         verification_model="test-model",
         nvda_tools=[_nvda_tool()],
         nvda_max_steps=3,
+        navigator=navigator,
     )
 
 

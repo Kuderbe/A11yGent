@@ -13,6 +13,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
 from a11y_gent.adaptor.llm_client import LlmClient
+from a11y_gent.adaptor.nvda_navigator import TaskNavigator
 from a11y_gent.config import RunConfig
 from a11y_gent.model.workflow_runtime import (
     RetrospectiveSubstate,
@@ -26,6 +27,7 @@ from a11y_gent.model.tool import Tool
 from a11y_gent.prompts import make_retrospective_completion_tool, make_verify_completion_tool
 from a11y_gent.task_retrospective import RetrospectiveState, build_retrospective_graph
 from a11y_gent.task_results import derive_task_result
+from a11y_gent.task_setup import setup_solve_task_window
 from a11y_gent.task_verification import (
     VerificationState,
     build_verification_graph,
@@ -43,6 +45,7 @@ class WorkflowDependencies:
     verification_model: str
     nvda_tools: list[Tool]
     nvda_max_steps: int
+    navigator: TaskNavigator | None = None
 
 
 class WorkflowRun:
@@ -58,6 +61,7 @@ class WorkflowRun:
         self.checkpoint_path = checkpoint_path.resolve()
         self.checkpoint_id = checkpoint_id
         self._connection = connection
+        self._dependencies = dependencies
         self._checkpointer = AsyncSqliteSaver(
             self._connection,
             serde=JsonPlusSerializer(
@@ -80,9 +84,28 @@ class WorkflowRun:
         """Return the non-secret file needed to reopen this workflow."""
         return self.checkpoint_path.with_suffix(".metadata.json")
 
-    async def invoke(self, state: WorkflowRuntimeState) -> WorkflowRuntimeState:
-        """Run the workflow supergraph with its sole checkpoint owner."""
+    async def invoke(self, state: WorkflowRuntimeState | None = None) -> WorkflowRuntimeState:
+        """Run a new workflow state or resume the checkpointed thread."""
+        if state is None:
+            await self._open_resume_window()
         return await self._graph.ainvoke(state, self.thread_config)
+
+    async def _open_resume_window(self) -> None:
+        if self._dependencies.navigator is None:
+            return
+        state = await self.state()
+        for retrospective_state in sorted(state["retrospective_states"], key=lambda state: state["task"]["number"]):
+            task = retrospective_state["task"]
+            completed = {
+                verification["candidate_reference"]
+                for verification in state["verification_states"]
+                if verification["task"]["number"] == task["number"]
+            }
+            if len(completed) < len(retrospective_state["candidates"]):
+                error = await setup_solve_task_window(self._dependencies.navigator, task)
+                if error is not None:
+                    raise RuntimeError(error["message"])
+                return
 
     async def state(self) -> WorkflowRuntimeState:
         """Return the current durable superstate."""
