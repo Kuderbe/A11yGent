@@ -13,6 +13,7 @@ from a11y_gent.task_retrospective import initial_retrospective_state
 from a11y_gent.workflow_runtime import (
     WorkflowDependencies,
     create_workflow_run,
+    create_initial_workflow_state,
     resume_workflow_run,
 )
 
@@ -118,6 +119,56 @@ class _InterruptingVerificationLlm(_VerificationLlm):
         return await super().infer(history, model, use_tools)
 
 
+class _InterruptingSolveLlm(LlmClient):
+    def __init__(self, interrupt_second=True):
+        self.started_tasks = []
+        self.interrupt_second = interrupt_second
+
+    async def infer(self, history, model, use_tools=True):
+        task = "first" if "First task" in history[0]["content"] else "second"
+        if not use_tools:
+            self.started_tasks.append(task)
+            return {
+                "message": {
+                    "origin": MessageOrigin.ASSISTANT,
+                    "name": "assistant",
+                    "content": "I will attempt the task with NVDA.",
+                }
+            }
+        if task == "second" and self.interrupt_second:
+            raise RuntimeError("interrupted second task")
+        call = {
+            "id": f"complete-{task}",
+            "tool": {"name": "complete_solve_task", "description": "", "tool_function": lambda: None},
+            "arguments": {"status": "succeeded", "summary": f"{task.capitalize()} task completed."},
+        }
+        return {
+            "message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]},
+            "tool_calls": [call],
+        }
+
+    async def execute_tool_call(self, tool_call):
+        return {
+            "origin": MessageOrigin.TOOL,
+            "name": tool_call["tool"]["name"],
+            "content": "solve task completed",
+            "reference_id": tool_call["id"],
+        }
+
+
+class _EmptyRetrospectiveLlm(_ScriptedLlm):
+    async def infer(self, history, model, use_tools=True):
+        call = {
+            "id": "complete-retrospective",
+            "tool": {"name": "complete_retrospective", "description": "", "tool_function": lambda: None},
+            "arguments": {"descriptions": [], "verification_briefs": []},
+        }
+        return {
+            "message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]},
+            "tool_calls": [call],
+        }
+
+
 class _Navigator:
     def __init__(self):
         self.opened_urls = []
@@ -195,6 +246,16 @@ def test_supergraph_derives_final_results_after_verification():
 def test_resume_continues_at_the_first_incomplete_verification():
     with tempfile.TemporaryDirectory() as tmp:
         asyncio.run(_resume_incomplete_verification(Path(tmp)))
+
+
+def test_supergraph_runs_task_pipelines_in_order_and_retains_earlier_results():
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(_retain_earlier_results_when_a_later_task_is_interrupted(Path(tmp)))
+
+
+def test_supergraph_completes_selected_task_pipelines_in_order():
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(_complete_selected_task_pipelines_in_order(Path(tmp)))
 
 
 async def _verify_candidates_in_local_order(tmp: Path):
@@ -303,6 +364,54 @@ async def _resume_incomplete_verification(tmp: Path):
     assert completed["solve_states"] == state["solve_states"]
 
 
+async def _retain_earlier_results_when_a_later_task_is_interrupted(tmp: Path):
+    solve_llm = _InterruptingSolveLlm()
+    navigator = _Navigator()
+    run = await create_workflow_run(
+        _config(tmp / "trajectory.jsonl"),
+        "run-task-order",
+        _dependencies(solve_llm=solve_llm, retrospective_llm=_EmptyRetrospectiveLlm(), navigator=navigator),
+    )
+    try:
+        try:
+            await run.invoke(create_initial_workflow_state([_task("First task", 1), _task("Second task", 2)]))
+        except RuntimeError as error:
+            assert str(error) == "interrupted second task"
+        else:
+            raise AssertionError("The second task must interrupt the workflow")
+        persisted = await run.state()
+    finally:
+        await run.close()
+
+    assert solve_llm.started_tasks == ["first", "second"]
+    assert navigator.opened_urls == [_task("First task", 1)["url"], _task("Second task", 2)["url"]]
+    assert [state["task"]["number"] for state in persisted["solve_states"]] == [1]
+    assert persisted["final_result_states"] == [
+        {
+            "task": _task("First task", 1),
+            "verdict": {"status": VerdictStatus.SUCCEEDED, "summary": "First task completed.", "barriers": []},
+        }
+    ]
+
+
+async def _complete_selected_task_pipelines_in_order(tmp: Path):
+    solve_llm = _InterruptingSolveLlm(interrupt_second=False)
+    navigator = _Navigator()
+    run = await create_workflow_run(
+        _config(tmp / "trajectory.jsonl"),
+        "run-complete-task-order",
+        _dependencies(solve_llm=solve_llm, retrospective_llm=_EmptyRetrospectiveLlm(), navigator=navigator),
+    )
+    try:
+        completed = await run.invoke(create_initial_workflow_state([_task("First task", 1), _task("Second task", 2)]))
+    finally:
+        await run.close()
+
+    assert solve_llm.started_tasks == ["first", "second"]
+    assert navigator.opened_urls == [_task("First task", 1)["url"], _task("Second task", 2)["url"]]
+    assert [result["task"]["number"] for result in completed["final_result_states"]] == [1, 2]
+
+
 async def _expose_native_retrospective_subgraph_state(tmp: Path):
     run = await create_workflow_run(
         _config(tmp / "trajectory.jsonl"),
@@ -334,7 +443,8 @@ async def _keep_llm_context_local(tmp: Path):
             "reference_id": "devtools-1",
         },
     ]
-    state["retrospective_states"] = [initial_retrospective_state(_task(), solve_task_history)]
+    state["solve_states"] = [{"task": _task(), "history": solve_task_history}]
+    state["retrospective_states"] = []
     state["verification_states"] = []
     state["discovery_state"] = {"foreign": "Must not enter the prompt."}
     state["final_result_states"] = []
@@ -355,8 +465,8 @@ async def _keep_llm_context_local(tmp: Path):
     assert "verification_states" not in prompt
 
 
-def _task():
-    return {"number": 1, "url": "https://shop.example/", "description": "Purchase a product."}
+def _task(description="Purchase a product.", number=1):
+    return {"number": number, "url": "https://shop.example/", "description": description}
 
 
 def _candidate(name):
@@ -395,6 +505,7 @@ def _completed_retrospective_state(candidates):
 
 def _completed_workflow_state(solve_status):
     return {
+        "tasks": [_task()],
         "discovery_state": {},
         "solve_states": [{"task": _task(), "history": _completed_solve_history(solve_status)}],
         "retrospective_states": [_completed_retrospective_state([_candidate("confirmation")])],
@@ -467,8 +578,10 @@ def _nvda_tool():
     return {"name": "read_speech", "description": "", "tool_function": lambda: None}
 
 
-def _dependencies(verification_llm=None, retrospective_llm=None, navigator=None):
+def _dependencies(verification_llm=None, retrospective_llm=None, navigator=None, solve_llm=None):
     return WorkflowDependencies(
+        solve_llm=solve_llm or _InterruptingSolveLlm(),
+        solve_model="test-model",
         retrospective_llm=retrospective_llm or _ScriptedLlm(),
         retrospective_model="test-model",
         verification_llm=verification_llm or _VerificationLlm(),
@@ -492,9 +605,10 @@ def _solve_history():
 
 def _workflow_state():
     return {
+        "tasks": [_task()],
         "discovery_state": {},
         "solve_states": [{"task": _task(), "history": _solve_history()}],
-        "retrospective_states": [initial_retrospective_state(_task(), _solve_history())],
+        "retrospective_states": [],
         "verification_states": [],
         "final_result_states": [],
     }

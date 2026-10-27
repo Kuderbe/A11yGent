@@ -36,8 +36,9 @@ async def solve_task(
 ) -> Verdict:
     """Attempt one task with NVDA tools and local direct-reporting sinks only."""
     graph = build_solve_task_graph(
-        config,
         llm,
+        config.model,
+        config.nvda_max_steps,
         [*nvda_tools, make_barrier_tool(), make_solve_task_completion_tool()],
     )
     state = await graph.ainvoke(initial_solve_task_state(task))
@@ -51,15 +52,15 @@ async def solve_task(
     }
 
 
-def build_solve_task_graph(config: RunConfig, llm: LlmClient, tools: list[Tool]):
+def build_solve_task_graph(llm: LlmClient, model: str, max_steps: int, tools: list[Tool]):
     graph = StateGraph(SolveTaskState)
-    graph.add_node("reason", _reason_node(llm, config.model))
-    graph.add_node("act", _act_node(llm, config.model))
+    graph.add_node("reason", _reason_node(llm, model))
+    graph.add_node("act", _act_node(llm, model))
     graph.add_node("observe", _observe_node(llm, tools))
     graph.add_edge(START, "reason")
     graph.add_edge("reason", "act")
     graph.add_conditional_edges("act", _after_act, {"observe": "observe", "reason": "reason"})
-    graph.add_conditional_edges("observe", _after_observe(config.nvda_max_steps), {"reason": "reason", "done": END})
+    graph.add_conditional_edges("observe", _after_observe(max_steps), {"reason": "reason", "done": END})
     return graph.compile()
 
 

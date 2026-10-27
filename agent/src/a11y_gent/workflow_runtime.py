@@ -20,14 +20,15 @@ from a11y_gent.model.workflow_runtime import (
     SolveTaskSubstate,
     VerificationSubstate,
     WorkflowRuntimeState,
-    replace_retrospective_states,
 )
-from a11y_gent.model.workflow import TaskResult, VerificationOutcome
+from a11y_gent.model.workflow import TaskResult, VerificationOutcome, WorkflowTask
 from a11y_gent.model.tool import Tool
-from a11y_gent.prompts import make_retrospective_completion_tool, make_verify_completion_tool
-from a11y_gent.task_retrospective import RetrospectiveState, build_retrospective_graph
+from a11y_gent.prompts import make_retrospective_completion_tool, make_solve_task_completion_tool, make_verify_completion_tool
+from a11y_gent.task_retrospective import RetrospectiveState, build_retrospective_graph, initial_retrospective_state
 from a11y_gent.task_results import derive_task_result
 from a11y_gent.task_setup import setup_solve_task_window
+from a11y_gent.task_solving import SolveTaskState, build_solve_task_graph, initial_solve_task_state
+from a11y_gent.tooling.barrier import make_barrier_tool
 from a11y_gent.task_verification import (
     VerificationState,
     build_verification_graph,
@@ -39,6 +40,8 @@ from a11y_gent.task_verification import (
 class WorkflowDependencies:
     """Injected phase capabilities used while building the supergraph."""
 
+    solve_llm: LlmClient
+    solve_model: str
     retrospective_llm: LlmClient
     retrospective_model: str
     verification_llm: LlmClient
@@ -148,31 +151,81 @@ async def resume_workflow_run(
 def build_workflow_supergraph(dependencies: WorkflowDependencies, checkpointer: AsyncSqliteSaver):
     """Build the supergraph with embedded phase graphs and one checkpoint owner."""
     graph = StateGraph(WorkflowRuntimeState)
+    graph.add_node("solve", _build_solve_subgraph(dependencies))
     graph.add_node("retrospective", _retrospective_subgraph(dependencies))
     graph.add_node("verification", _verification_subgraph(dependencies))
     graph.add_node("final_result", _final_result_subgraph())
-    graph.add_conditional_edges(START, _initial_sends, ["retrospective", "verification", "final_result"])
-    graph.add_conditional_edges("retrospective", _next_sends, ["verification", "final_result", END])
-    graph.add_conditional_edges("verification", _next_sends, ["verification", "final_result", END])
-    graph.add_edge("final_result", END)
+    graph.add_conditional_edges(START, _create_pipeline_sends, ["solve", "retrospective", "verification", "final_result", END])
+    for phase in ("solve", "retrospective", "verification", "final_result"):
+        graph.add_conditional_edges(phase, _create_pipeline_sends, ["solve", "retrospective", "verification", "final_result", END])
     return graph.compile(checkpointer=checkpointer)
 
 
-def _retrospective_sends(state: WorkflowRuntimeState) -> list[Send]:
-    return [
-        Send("retrospective", retrospective_state)
+def create_initial_workflow_state(tasks: list[WorkflowTask]) -> WorkflowRuntimeState:
+    """Create the initial durable state for an ordered task selection."""
+    return {
+        "tasks": tasks,
+        "discovery_state": {},
+        "solve_states": [],
+        "retrospective_states": [],
+        "verification_states": [],
+        "final_result_states": [],
+    }
+
+
+def _create_pipeline_sends(state: WorkflowRuntimeState) -> list[Send]:
+    completed = {result["task"]["number"] for result in state["final_result_states"]}
+    solve_states = {solve_state["task"]["number"]: solve_state for solve_state in state["solve_states"]}
+    retrospective_states = {
+        retrospective_state["task"]["number"]: retrospective_state
         for retrospective_state in state["retrospective_states"]
-        if not _retrospective_completed(retrospective_state)
-    ]
+    }
+    for task in sorted(state["tasks"], key=lambda task: task["number"]):
+        if task["number"] in completed:
+            continue
+        solve_state = solve_states.get(task["number"])
+        if solve_state is None:
+            return [Send("solve", {"task": task, **initial_solve_task_state(task)})]
+        retrospective_state = retrospective_states.get(task["number"])
+        if retrospective_state is None:
+            return [Send("retrospective", initial_retrospective_state(task, solve_state["history"]))]
+        if not _retrospective_completed(retrospective_state):
+            return [Send("retrospective", retrospective_state)]
+        verification_sends = _create_verification_sends(state, task, retrospective_state)
+        if verification_sends:
+            return verification_sends
+        return _create_final_result_sends(state, task, retrospective_state, solve_state)
+    return []
 
 
-def _initial_sends(state: WorkflowRuntimeState) -> list[Send]:
-    retrospective_sends = _retrospective_sends(state)
-    return retrospective_sends or _next_sends(state)
+def _build_solve_subgraph(dependencies: WorkflowDependencies):
+    child_graph = build_solve_task_graph(
+        dependencies.solve_llm,
+        dependencies.solve_model,
+        dependencies.nvda_max_steps,
+        [*dependencies.nvda_tools, make_barrier_tool(), make_solve_task_completion_tool()],
+    )
+    adapter = StateGraph(SolveSubgraphState)
+    adapter.add_node("setup", _create_solve_setup_node(dependencies.navigator))
+    adapter.add_node("phase", child_graph)
+    adapter.add_node("collect", _collect_solve_state)
+    adapter.add_edge(START, "setup")
+    adapter.add_edge("setup", "phase")
+    adapter.add_edge("phase", "collect")
+    adapter.add_edge("collect", END)
+    return adapter.compile()
 
 
-def _next_sends(state: WorkflowRuntimeState) -> list[Send]:
-    return _verification_sends(state) or _final_result_sends(state)
+def _create_solve_setup_node(navigator: TaskNavigator | None):
+    async def setup(state: SolveSubgraphState) -> dict:
+        if navigator is None:
+            return {}
+        error = await setup_solve_task_window(navigator, state["task"])
+        if error is not None:
+            raise RuntimeError(error["message"])
+        return {}
+
+    return setup
 
 
 def _retrospective_subgraph(dependencies: WorkflowDependencies):
@@ -190,21 +243,21 @@ def _retrospective_subgraph(dependencies: WorkflowDependencies):
     return adapter.compile()
 
 
-def _verification_sends(state: WorkflowRuntimeState) -> list[Send]:
+def _create_verification_sends(
+    state: WorkflowRuntimeState, task: WorkflowTask, retrospective_state: RetrospectiveSubstate
+) -> list[Send]:
     completed = {
         (verification["task"]["number"], verification["candidate_reference"])
         for verification in state["verification_states"]
     }
-    for retrospective_state in sorted(state["retrospective_states"], key=lambda state: state["task"]["number"]):
-        task = retrospective_state["task"]
-        for candidate_reference, candidate in enumerate(retrospective_state["candidates"]):
-            if (task["number"], candidate_reference) not in completed:
-                return [
-                    Send(
-                        "verification",
-                        initial_verification_state(task, candidate_reference, candidate),
-                    )
-                ]
+    for candidate_reference, candidate in enumerate(retrospective_state["candidates"]):
+        if (task["number"], candidate_reference) not in completed:
+            return [
+                Send(
+                    "verification",
+                    initial_verification_state(task, candidate_reference, candidate),
+                )
+            ]
     return []
 
 
@@ -216,30 +269,31 @@ def _retrospective_completed(state: RetrospectiveSubstate) -> bool:
     )
 
 
-def _final_result_sends(state: WorkflowRuntimeState) -> list[Send]:
+def _create_final_result_sends(
+    state: WorkflowRuntimeState,
+    task: WorkflowTask,
+    retrospective_state: RetrospectiveSubstate,
+    solve_state: SolveTaskSubstate,
+) -> list[Send]:
     completed = {result["task"]["number"] for result in state["final_result_states"]}
-    verifications_by_task = {}
-    for verification in state["verification_states"]:
-        verifications_by_task.setdefault(verification["task"]["number"], []).append(verification)
-    solve_states = {solve_state["task"]["number"]: solve_state for solve_state in state["solve_states"]}
-    sends = []
-    for retrospective_state in sorted(state["retrospective_states"], key=lambda state: state["task"]["number"]):
-        task = retrospective_state["task"]
-        if task["number"] in completed or not _retrospective_completed(retrospective_state):
-            continue
-        verifications = verifications_by_task.get(task["number"], [])
-        if len(verifications) != len(retrospective_state["candidates"]):
-            continue
-        sends.append(
-            Send(
-                "final_result",
-                {
-                    "solve_state": solve_states[task["number"]],
-                    "verification_outcomes": [verification["outcome"] for verification in verifications],
-                },
-            )
+    if task["number"] in completed:
+        return []
+    verifications = [
+        verification
+        for verification in state["verification_states"]
+        if verification["task"]["number"] == task["number"]
+    ]
+    if len(verifications) != len(retrospective_state["candidates"]):
+        return []
+    return [
+        Send(
+            "final_result",
+            {
+                "solve_state": solve_state,
+                "verification_outcomes": [verification["outcome"] for verification in verifications],
+            },
         )
-    return sends
+    ]
 
 
 def _verification_subgraph(dependencies: WorkflowDependencies):
@@ -258,10 +312,17 @@ def _verification_subgraph(dependencies: WorkflowDependencies):
     return adapter.compile()
 
 
+class SolveSubgraphState(SolveTaskState):
+    """Solve-task state with its supergraph output channel."""
+
+    task: WorkflowTask
+    solve_states: Annotated[list[SolveTaskSubstate], add]
+
+
 class RetrospectiveSubgraphState(RetrospectiveState):
     """Retrospective state with its supergraph output channel."""
 
-    retrospective_states: Annotated[list[RetrospectiveSubstate], replace_retrospective_states]
+    retrospective_states: Annotated[list[RetrospectiveSubstate], add]
 
 
 class VerificationSubgraphState(VerificationState):
@@ -297,6 +358,10 @@ def _collect_retrospective_state(state: RetrospectiveSubgraphState) -> dict:
             }
         ]
     }
+
+
+def _collect_solve_state(state: SolveSubgraphState) -> dict:
+    return {"solve_states": [{"task": state["task"], "history": state["history"]}]}
 
 
 def _collect_verification_state(state: VerificationSubgraphState) -> dict:

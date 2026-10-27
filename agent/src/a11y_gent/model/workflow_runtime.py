@@ -33,21 +33,12 @@ class VerificationSubstate(TypedDict):
     outcome: VerificationOutcome
 
 
-def replace_retrospective_states(
-    current: list[RetrospectiveSubstate], updates: list[RetrospectiveSubstate]
-) -> list[RetrospectiveSubstate]:
-    """Replace updated retrospective states by their task number."""
-    if not current:
-        return updates
-    updates_by_number = {state["task"]["number"]: state for state in updates}
-    return [updates_by_number.get(state["task"]["number"], state) for state in current]
-
-
 class WorkflowRuntimeState(TypedDict):
     """State retained by the checkpointed workflow supergraph."""
 
+    tasks: list[WorkflowTask]
     discovery_state: dict[str, object]
-    solve_states: list[SolveTaskSubstate]
-    retrospective_states: Annotated[list[RetrospectiveSubstate], replace_retrospective_states]
+    solve_states: Annotated[list[SolveTaskSubstate], add]
+    retrospective_states: Annotated[list[RetrospectiveSubstate], add]
     verification_states: Annotated[list[VerificationSubstate], add]
     final_result_states: Annotated[list[TaskResult], add]
