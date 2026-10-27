@@ -183,6 +183,7 @@ def _config(discovery_max_steps=150):
         openai_api_key="secret",
         nvda_mcp_url="http://nvda.test/mcp",
         trajectory_path="trajectory.jsonl",
+        retrospective_max_iterations=20,
         discovery_instructions="Use the test buyer account.",
         discovery_max_steps=discovery_max_steps,
     )
@@ -229,6 +230,7 @@ def _discover(config, llm):
                 openai_api_key=config.openai_api_key,
                 nvda_mcp_url=config.nvda_mcp_url,
                 trajectory_path=str(Path(tmp) / "trajectory.jsonl"),
+                retrospective_max_iterations=config.retrospective_max_iterations,
                 discovery_instructions=config.discovery_instructions,
                 discovery_max_steps=config.discovery_max_steps,
             )

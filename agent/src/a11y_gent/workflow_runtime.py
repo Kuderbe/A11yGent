@@ -24,7 +24,12 @@ from a11y_gent.model.workflow_runtime import (
 )
 from a11y_gent.model.workflow import TaskResult, VerificationOutcome, WorkflowTask
 from a11y_gent.model.tool import Tool
-from a11y_gent.prompts import make_retrospective_completion_tool, make_solve_task_completion_tool, make_verify_completion_tool
+from a11y_gent.prompts import (
+    make_candidate_creation_tool,
+    make_retrospective_completion_tool,
+    make_solve_task_completion_tool,
+    make_verify_completion_tool,
+)
 from a11y_gent.report_enrichment import (
     EnrichmentToolCall,
     ReportEnrichmentState,
@@ -51,6 +56,7 @@ class WorkflowDependencies:
     solve_model: str
     retrospective_llm: LlmClient
     retrospective_model: str
+    retrospective_max_iterations: int
     verification_llm: LlmClient
     verification_model: str
     nvda_tools: list[Tool]
@@ -259,8 +265,10 @@ def _create_solve_setup_node(navigator: TaskNavigator | None):
 def _retrospective_subgraph(dependencies: WorkflowDependencies):
     child_graph = build_retrospective_graph(
         dependencies.retrospective_llm,
+        make_candidate_creation_tool(),
         make_retrospective_completion_tool(),
         dependencies.retrospective_model,
+        dependencies.retrospective_max_iterations,
     )
     adapter = StateGraph(RetrospectiveSubgraphState)
     adapter.add_node("phase", child_graph)

@@ -46,6 +46,7 @@ def _config(tmp, report_path):
         nvda_mcp_url="http://nvda.example/mcp",
         devtools_mcp_url="http://devtools.example/mcp",
         trajectory_path=str(tmp / "trajectory.jsonl"),
+        retrospective_max_iterations=20,
         report_path=str(report_path),
         discovery_max_steps=3,
         nvda_max_steps=3,
@@ -83,7 +84,7 @@ class _PhasedLlm(LlmClient):
         if phase == "solve_task":
             call = _call("complete_solve_task", {"status": "succeeded", "summary": "Checkout completed."})
         elif phase == "retrospective":
-            call = _call("complete_retrospective", {"descriptions": [], "verification_briefs": []})
+            call = _call("complete_retrospective", {})
         else:
             raise AssertionError(f"Unexpected phase {phase}")
         return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]}, "tool_calls": [call]}

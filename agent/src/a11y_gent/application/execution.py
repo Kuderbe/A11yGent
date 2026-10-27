@@ -15,6 +15,7 @@ from a11y_gent.model.task import Task
 from a11y_gent.model.workflow import DiscoveryResult, WorkflowPhase, WorkflowTask
 from a11y_gent.prompts import (
     make_discovery_completion_tool,
+    make_candidate_creation_tool,
     make_report_enrichment_completion_tool,
     make_retrospective_completion_tool,
     make_solve_task_completion_tool,
@@ -134,7 +135,9 @@ async def _execute_phased(config: RunConfig, program: AgentProgram, run_id: str)
                 workflow_tasks=selected_tasks, discovery_incomplete=discovery_incomplete,
                 discovery_max_steps=config.discovery_max_steps, report_path=config.report_path,
                 solve_llm=_llm(config, solve_tools),
-                retrospective_llm=_llm(config, [make_retrospective_completion_tool()]),
+                retrospective_llm=_llm(
+                    config, [make_candidate_creation_tool(), make_retrospective_completion_tool()]
+                ),
                 verification_llm=_llm(config, [*nvda_tools, make_verify_completion_tool()]),
                 devtools_llm=_llm(config, [*devtools_tools, make_report_enrichment_completion_tool()]),
                 nvda_tools=nvda_tools, devtools_tools=devtools_tools, workflow_config=config,

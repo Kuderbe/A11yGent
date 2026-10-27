@@ -50,6 +50,11 @@ def build_app(program: AgentProgram) -> typer.Typer:
             150,
             help="Independent NVDA interaction limit for each task attempt and candidate verification.",
         ),
+        retrospective_max_iterations: int = typer.Option(
+            20,
+            min=1,
+            help="Maximum candidate-creation iterations for each retrospective analysis.",
+        ),
         report_out: str | None = typer.Option(
             None, help="Optional path for the Markdown report."
         ),
@@ -79,6 +84,7 @@ def build_app(program: AgentProgram) -> typer.Typer:
             devtools_mcp_url=devtools_mcp_url,
             discovery_max_steps=discovery_max_steps,
             nvda_max_steps=nvda_max_steps,
+            retrospective_max_iterations=retrospective_max_iterations,
             report_path=report_out,
             resume_path=resume,
         )

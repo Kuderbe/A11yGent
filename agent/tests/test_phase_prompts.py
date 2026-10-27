@@ -8,6 +8,7 @@ from a11y_gent.prompts import (
     build_retrospective_prompt,
     build_solve_task_prompt,
     build_verify_prompt,
+    make_candidate_creation_tool,
     make_discovery_completion_tool,
     make_report_enrichment_completion_tool,
     make_retrospective_completion_tool,
@@ -82,14 +83,20 @@ def test_retrospective_prompt_uses_immutable_solve_history_for_candidates_only()
     assert "report_barrier" in prompt
     assert "Submit button has no name." in prompt
     assert "candidates" in prompt
+    assert "create_candidate" in prompt
+    assert "complete_retrospective" in prompt
     assert "Do not report a confirmed barrier" in prompt
 
+    candidate_tool = make_candidate_creation_tool()
+    assert candidate_tool["tool_function"](
+        description="The confirmation may not be announced.",
+        verification_brief="Submit and inspect NVDA speech.",
+    ) == "candidate created"
+    assert _schema_properties(candidate_tool) == {"description", "verification_brief"}
+
     tool = make_retrospective_completion_tool()
-    assert tool["tool_function"](
-        descriptions=["The confirmation may not be announced."],
-        verification_briefs=["Submit and inspect NVDA speech."],
-    ) == "retrospective completed"
-    assert _schema_properties(tool) == {"descriptions", "verification_briefs"}
+    assert tool["tool_function"]() == "retrospective completed"
+    assert _schema_properties(tool) == set()
 
 
 def test_verify_prompt_receives_only_task_candidate_and_brief():

@@ -89,6 +89,7 @@ def _config(path):
         nvda_mcp_url="http://nvda.test/mcp",
         devtools_mcp_url="http://devtools.test/mcp",
         trajectory_path=str(path),
+        retrospective_max_iterations=20,
     )
 
 
@@ -289,8 +290,8 @@ class _PhasedLlm:
             assert self.tools == {"report_barrier", "complete_solve_task"}
             call = _phase_call("complete_solve_task", {"status": "succeeded", "summary": "Checkout completed."})
         elif phase == "retrospective":
-            assert self.tools == {"complete_retrospective"}
-            call = _phase_call("complete_retrospective", {"descriptions": [], "verification_briefs": []})
+            assert self.tools == {"create_candidate", "complete_retrospective"}
+            call = _phase_call("complete_retrospective", {})
         else:
             raise AssertionError(f"Unexpected phase {phase}")
         return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]}, "tool_calls": [call]}
@@ -313,6 +314,7 @@ def _config_without_task(path):
         nvda_mcp_url="http://nvda.test/mcp",
         devtools_mcp_url="http://devtools.test/mcp",
         trajectory_path=str(path),
+        retrospective_max_iterations=20,
     )
 
 

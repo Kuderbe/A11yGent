@@ -82,6 +82,7 @@ def test_cli_builds_config_from_options():
     assert config.openai_api_key == "key"
     assert config.model == "gpt-5-mini"
     assert config.nvda_max_steps == 150
+    assert config.retrospective_max_iterations == 20
     assert config.log_level is LogLevel.MINIMAL
     assert config.log_file_template is None
 
@@ -95,6 +96,7 @@ def test_cli_accepts_phased_workflow_configuration():
             "--devtools-mcp-url", "http://devtools.test/mcp",
             "--discovery-max-steps", "12",
             "--nvda-max-steps", "34",
+            "--retrospective-max-iterations", "7",
             "--report-out", "report.md",
             "--resume", "checkpoints/run-1.sqlite",
         ]
@@ -105,6 +107,7 @@ def test_cli_accepts_phased_workflow_configuration():
     assert config.devtools_mcp_url == "http://devtools.test/mcp"
     assert config.discovery_max_steps == 12
     assert config.nvda_max_steps == 34
+    assert config.retrospective_max_iterations == 7
     assert config.report_path == "report.md"
     assert config.resume_path == "checkpoints/run-1.sqlite"
 
@@ -117,6 +120,7 @@ def test_cli_allows_discovery_without_a_goal():
     assert config.discovery_instructions is None
     assert config.discovery_max_steps == 150
     assert config.nvda_max_steps == 150
+    assert config.retrospective_max_iterations == 20
     assert config.report_path is None
     assert config.resume_path is None
 

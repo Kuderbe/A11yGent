@@ -55,6 +55,7 @@ def _dependencies(context: RunContext) -> WorkflowDependencies:
         solve_model=context.model,
         retrospective_llm=context.retrospective_llm,
         retrospective_model=context.model,
+        retrospective_max_iterations=context.workflow_config.retrospective_max_iterations,
         verification_llm=context.verification_llm,
         verification_model=context.model,
         nvda_tools=context.nvda_tools,

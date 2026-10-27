@@ -20,6 +20,7 @@ class RunConfig:
     openai_api_key: str
     nvda_mcp_url: str
     trajectory_path: str
+    retrospective_max_iterations: int
     log_level: LogLevel = LogLevel.MINIMAL
     log_file_template: str | None = None
     discovery_instructions: str | None = None

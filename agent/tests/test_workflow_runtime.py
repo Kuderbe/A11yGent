@@ -24,40 +24,28 @@ class _ScriptedLlm(LlmClient):
 
     async def infer(self, history, model, use_tools=True):
         self.histories.append(history)
+        if len(self.histories) == 1:
+            name = "create_candidate"
+            arguments = {
+                "description": "The confirmation might not be announced.",
+                "verification_brief": "Submit and inspect NVDA speech.",
+            }
+        else:
+            name = "complete_retrospective"
+            arguments = {}
+        call = {
+            "id": f"retrospective-{len(self.histories)}",
+            "tool": {"name": name, "description": "", "tool_function": lambda: None},
+            "arguments": arguments,
+        }
         return {
             "message": {
                 "origin": MessageOrigin.ASSISTANT,
                 "name": "assistant",
                 "content": "",
-                "tool_calls": [
-                    {
-                        "id": "retrospective-1",
-                        "tool": {
-                            "name": "complete_retrospective",
-                            "description": "",
-                            "tool_function": lambda: None,
-                        },
-                        "arguments": {
-                            "descriptions": ["The confirmation might not be announced."],
-                            "verification_briefs": ["Submit and inspect NVDA speech."],
-                        },
-                    }
-                ],
+                "tool_calls": [call],
             },
-            "tool_calls": [
-                {
-                    "id": "retrospective-1",
-                    "tool": {
-                        "name": "complete_retrospective",
-                        "description": "",
-                        "tool_function": lambda: None,
-                    },
-                    "arguments": {
-                        "descriptions": ["The confirmation might not be announced."],
-                        "verification_briefs": ["Submit and inspect NVDA speech."],
-                    },
-                }
-            ],
+            "tool_calls": [call],
         }
 
     async def execute_tool_call(self, tool_call):
@@ -211,12 +199,49 @@ class _EmptyRetrospectiveLlm(_ScriptedLlm):
         call = {
             "id": "complete-retrospective",
             "tool": {"name": "complete_retrospective", "description": "", "tool_function": lambda: None},
-            "arguments": {"descriptions": [], "verification_briefs": []},
+            "arguments": {},
         }
         return {
             "message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]},
             "tool_calls": [call],
         }
+
+
+class _InterruptingRetrospectiveLlm(LlmClient):
+    def __init__(self):
+        self.calls = 0
+
+    async def infer(self, history, model, use_tools=True):
+        self.calls += 1
+        if self.calls == 2:
+            raise RuntimeError("interrupted retrospective")
+        return _retrospective_response(
+            "create_candidate",
+            {
+                "description": "The confirmation might not be announced.",
+                "verification_brief": "Submit and inspect NVDA speech.",
+            },
+        )
+
+    async def execute_tool_call(self, tool_call):
+        return _retrospective_tool_result(tool_call)
+
+
+class _CompletingRetrospectiveLlm(LlmClient):
+    def __init__(self):
+        self.histories = []
+
+    async def infer(self, history, model, use_tools=True):
+        self.histories.append(history)
+        assert any(
+            call["tool"]["name"] == "create_candidate"
+            for message in history
+            for call in message.get("tool_calls", [])
+        )
+        return _retrospective_response("complete_retrospective", {})
+
+    async def execute_tool_call(self, tool_call):
+        return _retrospective_tool_result(tool_call)
 
 
 class _Navigator:
@@ -296,6 +321,11 @@ def test_supergraph_derives_final_results_after_verification():
 def test_resume_continues_at_the_first_incomplete_verification():
     with tempfile.TemporaryDirectory() as tmp:
         asyncio.run(_resume_incomplete_verification(Path(tmp)))
+
+
+def test_resume_continues_retrospective_after_a_created_candidate():
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(_resume_retrospective_after_created_candidate(Path(tmp)))
 
 
 def test_supergraph_runs_task_pipelines_in_order_and_retains_earlier_results():
@@ -427,6 +457,43 @@ async def _resume_incomplete_verification(tmp: Path):
     assert completed["verification_states"][0]["outcome"]["evidence"] == "NVDA disproved first candidate."
     assert completed["retrospective_states"][0]["candidates"] == [_candidate("first"), _candidate("second")]
     assert completed["solve_states"] == state["solve_states"]
+
+
+async def _resume_retrospective_after_created_candidate(tmp: Path):
+    interrupted_llm = _InterruptingRetrospectiveLlm()
+    run = await create_workflow_run(
+        _config(tmp / "trajectory.jsonl"),
+        "run-resume-retrospective",
+        _dependencies(retrospective_llm=interrupted_llm),
+    )
+    try:
+        try:
+            await run.invoke(_workflow_state())
+        except RuntimeError as error:
+            assert str(error) == "interrupted retrospective"
+        else:
+            raise AssertionError("The second retrospective iteration must interrupt the initial run")
+        completing_llm = _CompletingRetrospectiveLlm()
+        resumed = await resume_workflow_run(
+            run.checkpoint_path,
+            run.checkpoint_id,
+            _dependencies(retrospective_llm=completing_llm),
+        )
+        try:
+            completed = await resumed.invoke()
+        finally:
+            await resumed.close()
+    finally:
+        await run.close()
+
+    assert interrupted_llm.calls == 2
+    assert len(completing_llm.histories) == 1
+    assert completed["retrospective_states"][0]["candidates"] == [
+        {
+            "description": "The confirmation might not be announced.",
+            "verification_brief": "Submit and inspect NVDA speech.",
+        }
+    ]
 
 
 async def _retain_earlier_results_when_a_later_task_is_interrupted(tmp: Path):
@@ -654,6 +721,27 @@ def _candidate(name):
     return {"description": f"{name} candidate", "verification_brief": f"Check {name} with NVDA."}
 
 
+def _retrospective_response(name, arguments):
+    call = {
+        "id": name,
+        "tool": {"name": name, "description": "", "tool_function": lambda: None},
+        "arguments": arguments,
+    }
+    return {
+        "message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]},
+        "tool_calls": [call],
+    }
+
+
+def _retrospective_tool_result(tool_call):
+    return {
+        "origin": MessageOrigin.TOOL,
+        "name": tool_call["tool"]["name"],
+        "content": "retrospective completed",
+        "reference_id": tool_call["id"],
+    }
+
+
 def _completed_empty_retrospective_state():
     return _completed_retrospective_state([])
 
@@ -672,10 +760,7 @@ def _completed_retrospective_state(candidates):
                     {
                         "id": "retrospective-empty",
                         "tool": {"name": "complete_retrospective", "description": ""},
-                        "arguments": {
-                            "descriptions": [candidate["description"] for candidate in candidates],
-                            "verification_briefs": [candidate["verification_brief"] for candidate in candidates],
-                        },
+                        "arguments": {},
                     }
                 ],
             },
@@ -770,6 +855,7 @@ def _dependencies(verification_llm=None, retrospective_llm=None, navigator=None,
         solve_model="test-model",
         retrospective_llm=retrospective_llm or _ScriptedLlm(),
         retrospective_model="test-model",
+        retrospective_max_iterations=20,
         verification_llm=verification_llm or _VerificationLlm(),
         verification_model="test-model",
         nvda_tools=[_nvda_tool()],
@@ -814,6 +900,7 @@ def _config(trajectory_path: Path) -> RunConfig:
         openai_api_key="key",
         nvda_mcp_url="http://nvda.example/mcp",
         trajectory_path=str(trajectory_path),
+        retrospective_max_iterations=20,
     )
 
 

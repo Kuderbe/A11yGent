@@ -70,25 +70,36 @@ def build_retrospective_prompt(task: WorkflowTask, solve_task_history: list[Mess
         f"Task: {task['description']}\n"
         f"Solve-task history:\n{_format_history(solve_task_history)}\n\n"
         "Identify only unreported suspected conditions that need targeted checking. "
-        "Return candidates only. Do not report a confirmed barrier. Complete by calling "
-        "complete_retrospective with ordered candidate descriptions and matching "
-        "verification briefs."
+        "Return candidates only. Do not report a confirmed barrier. For each candidate, call "
+        "create_candidate with one description and verification brief. When no further "
+        "candidates remain, call complete_retrospective."
+    )
+
+
+def make_candidate_creation_tool() -> Tool:
+    """Build the structured sink for one retrospective candidate."""
+
+    def create_candidate(description: str, verification_brief: str) -> str:
+        """Record one candidate and its targeted verification brief."""
+        return "candidate created"
+
+    return Tool(
+        name="create_candidate",
+        description="Create one candidate with a description and verification brief.",
+        tool_function=create_candidate,
     )
 
 
 def make_retrospective_completion_tool() -> Tool:
-    """Build the structured completion sink for retrospective candidates."""
+    """Build the structured completion sink for retrospective analysis."""
 
-    def complete_retrospective(descriptions: list, verification_briefs: list) -> str:
-        """Record ordered candidate descriptions and their verification briefs."""
+    def complete_retrospective() -> str:
+        """Record that retrospective analysis has no further candidates."""
         return "retrospective completed"
 
     return Tool(
         name="complete_retrospective",
-        description=(
-            "Complete retrospective analysis with ordered candidate descriptions and "
-            "matching verification briefs. Do not report confirmed barriers."
-        ),
+        description="Complete retrospective analysis without candidate values. Do not report confirmed barriers.",
         tool_function=complete_retrospective,
     )
 

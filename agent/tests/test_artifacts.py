@@ -30,6 +30,7 @@ def test_metadata_records_program_without_api_key():
             openai_api_key="secret",
             nvda_mcp_url="http://mcp",
             trajectory_path=trajectory,
+            retrospective_max_iterations=20,
             discovery_max_steps=8,
             nvda_max_steps=7,
             log_level=LogLevel.INFO,

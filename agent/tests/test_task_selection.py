@@ -59,6 +59,7 @@ def _config(task):
         openai_api_key="secret",
         nvda_mcp_url="http://nvda.test/mcp",
         trajectory_path="trajectory.jsonl",
+        retrospective_max_iterations=20,
     )
 
 

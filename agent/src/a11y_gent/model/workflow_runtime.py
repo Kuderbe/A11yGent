@@ -22,6 +22,7 @@ class RetrospectiveSubstate(TypedDict):
     solve_task_history: list[Message]
     history: list[Message]
     candidates: list[Candidate]
+    iterations: int
 
 
 class VerificationSubstate(TypedDict):

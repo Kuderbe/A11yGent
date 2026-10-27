@@ -141,6 +141,7 @@ def _config(tmp, nvda_max_steps):
         openai_api_key="key",
         nvda_mcp_url="http://nvda.example/mcp",
         trajectory_path=str(tmp / "trajectory.jsonl"),
+        retrospective_max_iterations=20,
         nvda_max_steps=nvda_max_steps,
     )
 
