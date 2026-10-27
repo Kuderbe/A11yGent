@@ -1,8 +1,12 @@
 """Offline tests for deterministic per-task Markdown rendering."""
 
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+
 from a11y_gent.model.verdict import VerdictStatus
 from a11y_gent.model.workflow import VerificationOutcomeStatus
-from a11y_gent.report_rendering import render_task_markdown_sections
+from a11y_gent.report_rendering import render_markdown_report, render_task_markdown_sections, write_markdown_report
 
 
 def test_renders_a_task_outcome_and_enriched_confirmed_barrier_details():
@@ -113,6 +117,91 @@ def test_matches_enrichment_to_the_global_barrier_order_across_tasks():
     assert "#### Unnamed account button" in markdown
 
 
+def test_renders_global_confirmed_numbers_and_discovery_disclosure():
+    first = _task_result()
+    second = _task_result()
+    second["task"] = {"number": 2, "url": "https://shop.example/account", "description": "Manage account"}
+    second["verdict"]["barriers"] = [_account_barrier()]
+    second_enrichment = _enrichment_state()
+    second_enrichment["barrier_reference"] = 1
+    second_enrichment["barrier"] = _account_barrier()
+    second_enrichment["enrichment"]["title"] = "Unnamed account button"
+
+    markdown = render_markdown_report(
+        [first, second], [], [_enrichment_state(), second_enrichment], True, discovery_max_steps=12, nvda_max_steps=34
+    )
+
+    assert markdown.startswith("# Accessibility assessment report\n\n- **Discovery:** Incomplete; tested tasks may not cover all ordinary-user goals.\n- **Limits:** 12 DevTools interactions; 34 NVDA interactions per task attempt and candidate verification.\n")
+    assert "#### Barrier 1: Unnamed payment button" in markdown
+    assert "#### Barrier 2: Unnamed account button" in markdown
+
+
+def test_renders_gap_free_global_candidate_numbers_and_common_remediations():
+    first = _task_result()
+    second = _task_result()
+    second["task"] = {"number": 2, "url": "https://shop.example/account", "description": "Manage account"}
+    second["verdict"]["barriers"] = [_account_barrier()]
+    second_enrichment = _enrichment_state()
+    second_enrichment["barrier_reference"] = 1
+    second_enrichment["barrier"] = _account_barrier()
+    verification_states = [_unverified_state(first["task"], 3, "Payment confirmation may not be announced."), _unverified_state(second["task"], 0, "Account update may not be announced.")]
+
+    markdown = render_markdown_report(
+        [first, second], verification_states, [_enrichment_state(), second_enrichment], False, discovery_max_steps=12, nvda_max_steps=34
+    )
+
+    assert "#### Candidate 1: Payment confirmation may not be announced." in markdown
+    assert "#### Candidate 2: Account update may not be announced." in markdown
+    assert "## Common remediations\n\n### Unnamed payment button\n\n- **Barriers:** 1, 2\n- **Suggested fix:** Provide an accessible name." in markdown
+
+
+def test_uses_global_candidate_numbers_in_execution_errors():
+    first = _task_result(barriers=[])
+    second = _task_result(barriers=[])
+    second["task"] = {"number": 2, "url": "https://shop.example/account", "description": "Manage account"}
+    first_verification = _unverified_state(first["task"], 3, "Payment confirmation may not be announced.")
+    second_verification = _unverified_state(second["task"], 0, "Account update may not be announced.")
+    second_verification["outcome"] = {
+        "candidate_reference": 0,
+        "status": VerificationOutcomeStatus.UNVERIFIED_EXECUTION_ERROR,
+        "evidence": "NVDA MCP stopped responding.",
+        "execution_error": {"task_number": 2, "phase": "verify", "candidate_reference": 0, "message": "NVDA MCP stopped responding."},
+    }
+
+    markdown = render_markdown_report([first, second], [first_verification, second_verification], [], False, discovery_max_steps=12, nvda_max_steps=34)
+
+    assert "## Task 02: Manage account" in markdown
+    assert "### Execution errors\n\n- **Verify (candidate 2):** NVDA MCP stopped responding." in markdown
+
+
+def test_discloses_no_confirmed_barriers_and_writes_requested_or_default_paths():
+    markdown = render_markdown_report([_task_result(barriers=[])], [], [], False, discovery_max_steps=12, nvda_max_steps=34)
+
+    assert "## No confirmed barriers\n\nNo confirmed barriers were found in the tested tasks." in markdown
+    assert "- **Tested tasks:** 01 Complete checkout" in markdown
+    with tempfile.TemporaryDirectory() as tmp:
+        explicit = Path(tmp) / "reports" / "assessment.md"
+        assert write_markdown_report(markdown, str(explicit)) == explicit
+        assert explicit.read_text(encoding="utf-8") == markdown
+        default = write_markdown_report(markdown, None, now=datetime(2026, 10, 27, 9, 45, tzinfo=UTC), directory=tmp)
+        assert default == Path(tmp) / "a11y-report-2026-10-27T09-45-00Z.md"
+        assert default.read_text(encoding="utf-8") == markdown
+
+
+def test_derives_verification_execution_errors_for_the_complete_report():
+    verification = _unverified_state(_task_result()["task"], 0, "Confirmation may not be announced.")
+    verification["outcome"] = {
+        "candidate_reference": 0,
+        "status": VerificationOutcomeStatus.UNVERIFIED_EXECUTION_ERROR,
+        "evidence": "NVDA MCP stopped responding.",
+        "execution_error": {"task_number": 1, "phase": "verify", "candidate_reference": 0, "message": "NVDA MCP stopped responding."},
+    }
+
+    markdown = render_markdown_report([_task_result(barriers=[])], [verification], [], False, discovery_max_steps=12, nvda_max_steps=34)
+
+    assert "### Execution errors\n\n- **Verify (candidate 1):** NVDA MCP stopped responding." in markdown
+
+
 def _task_result(barriers=None):
     return {
         "task": {"number": 1, "url": "https://shop.example/checkout", "description": "Complete checkout"},
@@ -153,6 +242,20 @@ def _enrichment_state():
             "implementation_context": "The button has no accessible name.",
             "remediation_target": "Payment button",
             "suggested_fix": "Provide an accessible name.",
+        },
+    }
+
+
+def _unverified_state(task, candidate_reference, description):
+    return {
+        "task": task,
+        "candidate_reference": candidate_reference,
+        "candidate": {"description": description, "verification_brief": "Check with NVDA."},
+        "history": [],
+        "outcome": {
+            "candidate_reference": candidate_reference,
+            "status": VerificationOutcomeStatus.UNVERIFIED_BUDGET_EXHAUSTED,
+            "evidence": "The NVDA interaction limit was reached.",
         },
     }
 
