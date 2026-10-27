@@ -106,6 +106,8 @@ def test_verify_prompt_receives_only_task_candidate_and_brief():
     assert "The confirmation may not be announced." in prompt
     assert "Submit and inspect NVDA speech." in prompt
     assert "NVDA" in prompt
+    assert "exactly one tool call" in prompt
+    assert "Wait for its observation" in prompt
     assert "DevTools" not in prompt
 
     tool = make_verify_completion_tool()

@@ -100,7 +100,9 @@ def build_verify_prompt(task: WorkflowTask, candidate_reference: int, candidate:
         f"Task: {task['description']}\n"
         f"Candidate {candidate_reference}: {candidate['description']}\n"
         f"Verification brief: {candidate['verification_brief']}\n\n"
-        "Do not investigate unrelated conditions. Complete by calling "
+        "Do not investigate unrelated conditions. In every action turn, make exactly one "
+        "tool call. Wait for its observation before making another tool call in a new action "
+        "turn. Complete by calling "
         "complete_verification with confirmed or discarded status and supporting "
         "NVDA evidence."
     )
