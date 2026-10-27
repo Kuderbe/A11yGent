@@ -6,6 +6,8 @@ from pathlib import Path
 
 from a11y_gent.application import execution
 from a11y_gent.config import RunConfig
+from a11y_gent.model.message import MessageOrigin
+from a11y_gent.profiles.baseline_v2.agent import BaselineV2
 
 
 class _UnavailableSession:
@@ -67,9 +69,11 @@ class _SuccessfulProgram:
 
 
 class _Navigator:
-    def __init__(self, session):
+    def __init__(self, session, navigators=None):
         self.session = session
         self.opened_url = None
+        if navigators is not None:
+            navigators.append(self)
 
     async def open(self, url):
         self.opened_url = url
@@ -233,6 +237,70 @@ def test_execution_uses_discovered_task_when_no_cli_task_is_supplied():
 
     assert program.context.task == {"url": "http://application.test", "goal": "Discovered task"}
     assert result["task"] == program.context.task
+
+
+def test_execution_runs_baseline_v2_with_isolated_phase_clients_and_durable_outputs():
+    original_client = execution.Client
+    original_register = execution.register_mcp_tools
+    original_llm = execution.OpenaiLlmClient
+    original_navigator = execution.McpNvdaNavigator
+    original_started = execution.write_started_metadata
+    navigators = []
+    try:
+        execution.Client = lambda url: _AvailableSession()
+        execution.register_mcp_tools = _no_tools
+        execution.OpenaiLlmClient = _phased_llm
+        execution.McpNvdaNavigator = lambda session: _Navigator(session, navigators)
+        execution.write_started_metadata = lambda *args: None
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "assessment.md"
+            config = _config(Path(tmp) / "trajectory.jsonl")
+            config = RunConfig(**{**config.__dict__, "report_path": str(report_path), "nvda_max_steps": 3})
+            report = asyncio.run(execution.execute(config, BaselineV2()))
+
+            assert report_path.read_text(encoding="utf-8") == report.to_markdown()
+            assert Path(config.trajectory_path).with_name("trajectory.workflow.sqlite").exists()
+            assert navigators[0].opened_url == config.application_url
+    finally:
+        execution.Client = original_client
+        execution.register_mcp_tools = original_register
+        execution.OpenaiLlmClient = original_llm
+        execution.McpNvdaNavigator = original_navigator
+        execution.write_started_metadata = original_started
+
+
+async def _no_tools(session):
+    return []
+
+
+def _phased_llm(base_url, api_key, tools, headers):
+    return _PhasedLlm({tool["name"] for tool in tools})
+
+
+class _PhasedLlm:
+    def __init__(self, tools):
+        self.tools = tools
+
+    async def infer(self, history, model, use_tools=True):
+        if not use_tools:
+            return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "I will complete this phase."}}
+        phase = history[0]["name"]
+        if phase == "solve_task":
+            assert self.tools == {"complete_solve_task"}
+            call = _phase_call("complete_solve_task", {"status": "succeeded", "summary": "Checkout completed."})
+        elif phase == "retrospective":
+            assert self.tools == {"complete_retrospective"}
+            call = _phase_call("complete_retrospective", {"descriptions": [], "verification_briefs": []})
+        else:
+            raise AssertionError(f"Unexpected phase {phase}")
+        return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]}, "tool_calls": [call]}
+
+    async def execute_tool_call(self, tool_call):
+        return {"origin": MessageOrigin.TOOL, "name": tool_call["tool"]["name"], "content": "completed", "reference_id": tool_call["id"]}
+
+
+def _phase_call(name, arguments):
+    return {"id": name, "tool": {"name": name, "description": "", "tool_function": lambda: None}, "arguments": arguments}
 
 
 def _config_without_task(path):

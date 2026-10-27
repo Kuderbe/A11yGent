@@ -20,6 +20,7 @@ dependencies = [
 [project.scripts]
 a11y_gent = "a11y_gent.main:main"
 a11y-gent-baseline = "a11y_gent.profiles.baseline.main:main"
+a11y-gent-baseline-v2 = "a11y_gent.profiles.baseline_v2.main:main"
 
 [build-system]
 requires = ["uv_build>=0.12.11,<0.13.0"]

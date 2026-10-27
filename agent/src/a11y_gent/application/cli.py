@@ -83,7 +83,10 @@ def build_app(program: AgentProgram) -> typer.Typer:
             resume_path=resume,
         )
         result = asyncio.run(execute(config, program))
-        print("Verdict:", result["verdict"])
+        if hasattr(result, "save_to_file"):
+            print("Report:", config.report_path or "a UTC-timestamped Markdown file")
+        else:
+            print("Verdict:", result["verdict"])
 
     return app
 
