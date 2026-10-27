@@ -126,13 +126,14 @@ async def _execute_phased(config: RunConfig, program: AgentProgram, run_id: str)
             nvda_max_steps=config.nvda_max_steps,
         )
         write_started_metadata(config, program, run_id)
+        solve_tools = [*nvda_tools, make_barrier_tool(), make_solve_task_completion_tool()]
         report = await program.run(
             RunContext(
                 task, config.model, config.nvda_max_steps, config.trajectory_path,
-                _llm(config, [*nvda_tools, make_solve_task_completion_tool()]), McpNvdaNavigator(nvda_session), run_id,
+                _llm(config, solve_tools), McpNvdaNavigator(nvda_session), run_id,
                 workflow_tasks=selected_tasks, discovery_incomplete=discovery_incomplete,
                 discovery_max_steps=config.discovery_max_steps, report_path=config.report_path,
-                solve_llm=_llm(config, [*nvda_tools, make_solve_task_completion_tool()]),
+                solve_llm=_llm(config, solve_tools),
                 retrospective_llm=_llm(config, [make_retrospective_completion_tool()]),
                 verification_llm=_llm(config, [*nvda_tools, make_verify_completion_tool()]),
                 devtools_llm=_llm(config, [*devtools_tools, make_report_enrichment_completion_tool()]),

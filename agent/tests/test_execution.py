@@ -286,7 +286,7 @@ class _PhasedLlm:
             return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "I will complete this phase."}}
         phase = history[0]["name"]
         if phase == "solve_task":
-            assert self.tools == {"complete_solve_task"}
+            assert self.tools == {"report_barrier", "complete_solve_task"}
             call = _phase_call("complete_solve_task", {"status": "succeeded", "summary": "Checkout completed."})
         elif phase == "retrospective":
             assert self.tools == {"complete_retrospective"}
