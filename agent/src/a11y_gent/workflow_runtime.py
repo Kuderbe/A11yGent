@@ -16,6 +16,7 @@ from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.adaptor.nvda_navigator import TaskNavigator
 from a11y_gent.config import RunConfig
 from a11y_gent.model.workflow_runtime import (
+    EnrichmentSubstate,
     RetrospectiveSubstate,
     SolveTaskSubstate,
     VerificationSubstate,
@@ -24,6 +25,12 @@ from a11y_gent.model.workflow_runtime import (
 from a11y_gent.model.workflow import TaskResult, VerificationOutcome, WorkflowTask
 from a11y_gent.model.tool import Tool
 from a11y_gent.prompts import make_retrospective_completion_tool, make_solve_task_completion_tool, make_verify_completion_tool
+from a11y_gent.report_enrichment import (
+    EnrichmentToolCall,
+    ReportEnrichmentState,
+    build_report_enrichment_graph,
+    initial_report_enrichment_state,
+)
 from a11y_gent.task_retrospective import RetrospectiveState, build_retrospective_graph, initial_retrospective_state
 from a11y_gent.task_results import derive_task_result
 from a11y_gent.task_setup import setup_solve_task_window
@@ -48,6 +55,10 @@ class WorkflowDependencies:
     verification_model: str
     nvda_tools: list[Tool]
     nvda_max_steps: int
+    enrichment_llm: LlmClient
+    enrichment_model: str
+    devtools_tools: list[Tool]
+    devtools_max_steps: int
     navigator: TaskNavigator | None = None
 
 
@@ -155,9 +166,11 @@ def build_workflow_supergraph(dependencies: WorkflowDependencies, checkpointer: 
     graph.add_node("retrospective", _retrospective_subgraph(dependencies))
     graph.add_node("verification", _verification_subgraph(dependencies))
     graph.add_node("final_result", _final_result_subgraph())
-    graph.add_conditional_edges(START, _create_pipeline_sends, ["solve", "retrospective", "verification", "final_result", END])
-    for phase in ("solve", "retrospective", "verification", "final_result"):
-        graph.add_conditional_edges(phase, _create_pipeline_sends, ["solve", "retrospective", "verification", "final_result", END])
+    graph.add_node("enrichment", _enrichment_subgraph(dependencies))
+    phases = ["solve", "retrospective", "verification", "final_result", "enrichment", END]
+    graph.add_conditional_edges(START, _create_pipeline_sends, phases)
+    for phase in ("solve", "retrospective", "verification", "final_result", "enrichment"):
+        graph.add_conditional_edges(phase, _create_pipeline_sends, phases)
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -170,6 +183,7 @@ def create_initial_workflow_state(tasks: list[WorkflowTask]) -> WorkflowRuntimeS
         "retrospective_states": [],
         "verification_states": [],
         "final_result_states": [],
+        "enrichment_states": [],
     }
 
 
@@ -195,6 +209,20 @@ def _create_pipeline_sends(state: WorkflowRuntimeState) -> list[Send]:
         if verification_sends:
             return verification_sends
         return _create_final_result_sends(state, task, retrospective_state, solve_state)
+    return _create_enrichment_sends(state)
+
+
+def _create_enrichment_sends(state: WorkflowRuntimeState) -> list[Send]:
+    enriched = {enrichment["barrier_reference"] for enrichment in state["enrichment_states"]}
+    barriers = [barrier for result in state["final_result_states"] for barrier in result["verdict"]["barriers"]]
+    for barrier_reference, barrier in enumerate(barriers):
+        if barrier_reference not in enriched:
+            return [
+                Send(
+                    "enrichment",
+                    {"barrier_reference": barrier_reference, **initial_report_enrichment_state(barrier)},
+                )
+            ]
     return []
 
 
@@ -339,11 +367,34 @@ class FinalResultSubgraphState(TypedDict):
     final_result_states: Annotated[list[TaskResult], add]
 
 
+class EnrichmentSubgraphState(ReportEnrichmentState):
+    """Inputs and output for one confirmed-barrier enrichment."""
+
+    barrier_reference: int
+    enrichment_states: Annotated[list[EnrichmentSubstate], add]
+
+
 def _final_result_subgraph():
     graph = StateGraph(FinalResultSubgraphState)
     graph.add_node("derive", _final_result_node)
     graph.add_edge(START, "derive")
     graph.add_edge("derive", END)
+    return graph.compile()
+
+
+def _enrichment_subgraph(dependencies: WorkflowDependencies):
+    child_graph = build_report_enrichment_graph(
+        dependencies.enrichment_llm,
+        dependencies.enrichment_model,
+        dependencies.devtools_tools,
+        dependencies.devtools_max_steps,
+    )
+    graph = StateGraph(EnrichmentSubgraphState)
+    graph.add_node("phase", child_graph)
+    graph.add_node("collect", _collect_enrichment_state)
+    graph.add_edge(START, "phase")
+    graph.add_edge("phase", "collect")
+    graph.add_edge("collect", END)
     return graph.compile()
 
 
@@ -376,6 +427,18 @@ def _collect_verification_state(state: VerificationSubgraphState) -> dict:
                 "history": state["history"],
                 "outcome": state["outcome"],
             },
+        ]
+    }
+
+
+def _collect_enrichment_state(state: EnrichmentSubgraphState) -> dict:
+    return {
+        "enrichment_states": [
+            {
+                "barrier_reference": state["barrier_reference"],
+                "barrier": state["barrier"],
+                "enrichment": state["enrichment"],
+            }
         ]
     }
 

@@ -112,6 +112,56 @@ class _VerificationLlm(LlmClient):
         }
 
 
+class _FailingEnrichmentLlm(LlmClient):
+    async def infer(self, history, model, use_tools=True):
+        raise AssertionError("Enrichment must be skipped without confirmed barriers")
+
+    async def execute_tool_call(self, tool_call):
+        raise AssertionError("Enrichment must be skipped without confirmed barriers")
+
+
+class _CompletionEnrichmentLlm(LlmClient):
+    async def infer(self, history, model, use_tools=True):
+        if not use_tools:
+            return {
+                "message": {
+                    "origin": MessageOrigin.ASSISTANT,
+                    "name": "assistant",
+                    "content": "I will inspect the implementation details.",
+                }
+            }
+        call = {
+            "id": "complete-enrichment",
+            "tool": {"name": "complete_report_enrichment", "description": "", "tool_function": lambda: None},
+            "arguments": {
+                "title": "Unnamed payment button",
+                "implementation_context": "The button has no accessible name.",
+                "remediation_target": "Payment button",
+                "suggested_fix": "Provide an accessible name.",
+            },
+        }
+        return {
+            "message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]},
+            "tool_calls": [call],
+        }
+
+    async def execute_tool_call(self, tool_call):
+        return {
+            "origin": MessageOrigin.TOOL,
+            "name": tool_call["tool"]["name"],
+            "content": "report enrichment completed",
+            "reference_id": tool_call["id"],
+        }
+
+
+class _ErrorEnrichmentLlm(LlmClient):
+    async def infer(self, history, model, use_tools=True):
+        raise RuntimeError("DevTools inspection timed out")
+
+    async def execute_tool_call(self, tool_call):
+        raise AssertionError("No tool call follows a failed inference")
+
+
 class _InterruptingVerificationLlm(_VerificationLlm):
     async def infer(self, history, model, use_tools=True):
         if use_tools and "second candidate" in history[0]["content"]:
@@ -256,6 +306,21 @@ def test_supergraph_runs_task_pipelines_in_order_and_retains_earlier_results():
 def test_supergraph_completes_selected_task_pipelines_in_order():
     with tempfile.TemporaryDirectory() as tmp:
         asyncio.run(_complete_selected_task_pipelines_in_order(Path(tmp)))
+def test_supergraph_skips_enrichment_without_confirmed_barriers():
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(_skip_enrichment_without_confirmed_barriers(Path(tmp)))
+
+
+def test_supergraph_enriches_confirmed_barriers_after_task_completion():
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(_enrich_confirmed_barriers_after_task_completion(Path(tmp)))
+
+
+def test_supergraph_retains_confirmed_barriers_when_enrichment_fails():
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(_retain_confirmed_barriers_when_enrichment_fails(Path(tmp)))
+
+
 
 
 async def _verify_candidates_in_local_order(tmp: Path):
@@ -412,6 +477,122 @@ async def _complete_selected_task_pipelines_in_order(tmp: Path):
     assert [result["task"]["number"] for result in completed["final_result_states"]] == [1, 2]
 
 
+async def _skip_enrichment_without_confirmed_barriers(tmp: Path):
+    run = await create_workflow_run(
+        _config(tmp / "trajectory.jsonl"),
+        "run-skip-enrichment",
+        _dependencies(enrichment_llm=_FailingEnrichmentLlm()),
+    )
+    state = {
+        "tasks": [_task()],
+        "discovery_state": {},
+        "solve_states": [],
+        "retrospective_states": [],
+        "verification_states": [],
+        "final_result_states": [
+            {
+                "task": _task(),
+                "verdict": {"status": VerdictStatus.SUCCEEDED, "summary": "Order completed.", "barriers": []},
+            }
+        ],
+        "enrichment_states": [],
+    }
+    try:
+        completed = await run.invoke(state)
+    finally:
+        await run.close()
+
+    assert completed["enrichment_states"] == []
+
+
+async def _enrich_confirmed_barriers_after_task_completion(tmp: Path):
+    run = await create_workflow_run(
+        _config(tmp / "trajectory.jsonl"),
+        "run-enrich-confirmed-barrier",
+        _dependencies(enrichment_llm=_CompletionEnrichmentLlm()),
+    )
+    state = {
+        "tasks": [_task()],
+        "discovery_state": {},
+        "solve_states": [],
+        "retrospective_states": [],
+        "verification_states": [],
+        "final_result_states": [
+            {
+                "task": _task(),
+                "verdict": {
+                    "status": VerdictStatus.SUCCEEDED_WITH_AVOIDABLE_DIFFICULTY,
+                    "summary": "Order completed.",
+                    "barriers": [_direct_barrier()],
+                },
+            }
+        ],
+        "enrichment_states": [],
+    }
+    try:
+        completed = await run.invoke(state)
+    finally:
+        await run.close()
+
+    assert completed["enrichment_states"] == [
+        {
+            "barrier_reference": 0,
+            "barrier": _direct_barrier(),
+            "enrichment": {
+                "title": "Unnamed payment button",
+                "implementation_context": "The button has no accessible name.",
+                "remediation_target": "Payment button",
+                "suggested_fix": "Provide an accessible name.",
+            },
+        }
+    ]
+
+
+async def _retain_confirmed_barriers_when_enrichment_fails(tmp: Path):
+    run = await create_workflow_run(
+        _config(tmp / "trajectory.jsonl"),
+        "run-enrichment-failure",
+        _dependencies(enrichment_llm=_ErrorEnrichmentLlm()),
+    )
+    state = {
+        "tasks": [_task()],
+        "discovery_state": {},
+        "solve_states": [],
+        "retrospective_states": [],
+        "verification_states": [],
+        "final_result_states": [
+            {
+                "task": _task(),
+                "verdict": {
+                    "status": VerdictStatus.SUCCEEDED_WITH_AVOIDABLE_DIFFICULTY,
+                    "summary": "Order completed.",
+                    "barriers": [_direct_barrier()],
+                },
+            }
+        ],
+        "enrichment_states": [],
+    }
+    try:
+        completed = await run.invoke(state)
+    finally:
+        await run.close()
+
+    assert completed["final_result_states"][0]["verdict"]["barriers"] == [_direct_barrier()]
+    assert completed["enrichment_states"] == [
+        {
+            "barrier_reference": 0,
+            "barrier": _direct_barrier(),
+            "enrichment": {
+                "title": "The payment button has no accessible name.",
+                "implementation_context": "",
+                "remediation_target": "",
+                "suggested_fix": "manual investigation",
+                "error": "DevTools inspection timed out",
+            },
+        }
+    ]
+
+
 async def _expose_native_retrospective_subgraph_state(tmp: Path):
     run = await create_workflow_run(
         _config(tmp / "trajectory.jsonl"),
@@ -511,6 +692,7 @@ def _completed_workflow_state(solve_status):
         "retrospective_states": [_completed_retrospective_state([_candidate("confirmation")])],
         "verification_states": [_confirmed_verification_state()],
         "final_result_states": [],
+        "enrichment_states": [],
     }
 
 
@@ -578,7 +760,11 @@ def _nvda_tool():
     return {"name": "read_speech", "description": "", "tool_function": lambda: None}
 
 
-def _dependencies(verification_llm=None, retrospective_llm=None, navigator=None, solve_llm=None):
+def _devtools_tool():
+    return {"name": "inspect_page", "description": "", "tool_function": lambda: None}
+
+
+def _dependencies(verification_llm=None, retrospective_llm=None, navigator=None, solve_llm=None, enrichment_llm=None):
     return WorkflowDependencies(
         solve_llm=solve_llm or _InterruptingSolveLlm(),
         solve_model="test-model",
@@ -588,6 +774,10 @@ def _dependencies(verification_llm=None, retrospective_llm=None, navigator=None,
         verification_model="test-model",
         nvda_tools=[_nvda_tool()],
         nvda_max_steps=3,
+        enrichment_llm=enrichment_llm or _FailingEnrichmentLlm(),
+        enrichment_model="test-model",
+        devtools_tools=[_devtools_tool()],
+        devtools_max_steps=3,
         navigator=navigator,
     )
 
@@ -611,6 +801,7 @@ def _workflow_state():
         "retrospective_states": [],
         "verification_states": [],
         "final_result_states": [],
+        "enrichment_states": [],
     }
 
 

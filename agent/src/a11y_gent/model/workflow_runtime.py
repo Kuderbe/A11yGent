@@ -4,7 +4,8 @@ from operator import add
 from typing import Annotated, TypedDict
 
 from a11y_gent.model.message import Message
-from a11y_gent.model.workflow import Candidate, TaskResult, VerificationOutcome, WorkflowTask
+from a11y_gent.model.verdict import Barrier
+from a11y_gent.model.workflow import BarrierEnrichment, Candidate, TaskResult, VerificationOutcome, WorkflowTask
 
 
 class SolveTaskSubstate(TypedDict):
@@ -33,6 +34,14 @@ class VerificationSubstate(TypedDict):
     outcome: VerificationOutcome
 
 
+class EnrichmentSubstate(TypedDict):
+    """State retained for one confirmed-barrier enrichment."""
+
+    barrier_reference: int
+    barrier: Barrier
+    enrichment: BarrierEnrichment
+
+
 class WorkflowRuntimeState(TypedDict):
     """State retained by the checkpointed workflow supergraph."""
 
@@ -42,3 +51,4 @@ class WorkflowRuntimeState(TypedDict):
     retrospective_states: Annotated[list[RetrospectiveSubstate], add]
     verification_states: Annotated[list[VerificationSubstate], add]
     final_result_states: Annotated[list[TaskResult], add]
+    enrichment_states: Annotated[list[EnrichmentSubstate], add]
