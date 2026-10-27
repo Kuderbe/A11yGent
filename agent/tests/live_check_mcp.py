@@ -2,7 +2,7 @@
 
 Run explicitly against the VM; requires network access to the NVDA host:
 
-    A11Y_GENT_MCP_URL=http://192.168.64.4:8765/mcp \\
+    A11Y_GENT_MCP_URL=http://127.0.0.1:8765/mcp \\
         PYTHONPATH=src python tests/live_check_mcp.py
 
 It connects, registers the server's tools as agent Tools, prints the tool
@@ -21,7 +21,7 @@ from a11y_gent.adaptor.openai_llm_client import OpenaiLlmClient
 
 
 async def _run() -> None:
-    url = os.environ.get("A11Y_GENT_MCP_URL", "http://192.168.64.4:8765/mcp")
+    url = os.environ.get("A11Y_GENT_MCP_URL", "http://127.0.0.1:8765/mcp")
     print(f"connecting to {url}")
     async with Client(url) as session:
         tools = await register_mcp_tools(session)

@@ -30,7 +30,7 @@ def build_app(program: AgentProgram) -> typer.Typer:
         ),
         model: str = typer.Option("gpt-5-mini", envvar="A11Y_GENT_MODEL", help="LLM model name."),
         nvda_mcp_url: str = typer.Option(
-            "http://192.168.64.4:8765/mcp",
+            "http://127.0.0.1:8765/mcp",
             envvar="A11Y_GENT_MCP_URL",
             help="URL of the NVDA MCP bridge (its tools drive the agent).",
         ),

@@ -124,7 +124,7 @@ def test_cli_allows_discovery_without_a_goal():
 def test_cli_does_not_require_browser_mcp_options():
     result, config = _invoke(["--url", "http://x", "--goal", "g"])
     assert result.exit_code == 0, result.output
-    assert config.nvda_mcp_url == "http://192.168.64.4:8765/mcp"
+    assert config.nvda_mcp_url == "http://127.0.0.1:8765/mcp"
 
 
 def test_cli_requires_url():
@@ -155,12 +155,14 @@ def test_cli_options_override_defaults():
         [
             "--url", "http://x",
             "--goal", "g",
+            "--nvda-mcp-url", "http://127.0.0.1:18765/mcp",
             "--nvda-max-steps", "5",
             "--out", "t.jsonl",
             "--log-level", "debug",
             "--log-file", "logs/run-<TIMESTAMP>-<RUN_ID>.jsonl",
         ]
     )
+    assert config.nvda_mcp_url == "http://127.0.0.1:18765/mcp"
     assert config.nvda_max_steps == 5
     assert config.trajectory_path == "t.jsonl"
     assert config.log_level is LogLevel.DEBUG
