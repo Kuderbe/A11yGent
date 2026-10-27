@@ -7,6 +7,8 @@ from pathlib import Path
 from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.config import RunConfig
 from a11y_gent.model.message import MessageOrigin
+from a11y_gent.model.verdict import VerdictStatus
+from a11y_gent.model.workflow import VerificationOutcomeStatus
 from a11y_gent.task_retrospective import initial_retrospective_state
 from a11y_gent.workflow_runtime import (
     WorkflowDependencies,
@@ -144,6 +146,7 @@ async def _persist_nested_state_for_resume(tmp: Path):
     ]
     assert persisted == completed
     assert persisted["verification_states"][0]["candidate_reference"] == 0
+    assert persisted["final_result_states"][0]["verdict"]["status"] is VerdictStatus.FAILED
     assert "candidates" not in completed
     assert "confirmed_barriers" not in completed
     assert "task_results" not in completed
@@ -167,6 +170,11 @@ def test_supergraph_verifies_retrospective_candidates_in_local_order():
 def test_supergraph_skips_verification_for_completed_empty_candidates():
     with tempfile.TemporaryDirectory() as tmp:
         asyncio.run(_skip_empty_candidates(Path(tmp)))
+
+
+def test_supergraph_derives_final_results_after_verification():
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(_derive_final_results(Path(tmp)))
 
 
 async def _verify_candidates_in_local_order(tmp: Path):
@@ -213,6 +221,29 @@ async def _skip_empty_candidates(tmp: Path):
     assert completed["verification_states"] == []
 
 
+async def _derive_final_results(tmp: Path):
+    run = await create_workflow_run(_config(tmp / "trajectory.jsonl"), "run-final-results", _dependencies())
+    failed_run = await create_workflow_run(_config(tmp / "failed-trajectory.jsonl"), "run-failed-result", _dependencies())
+    try:
+        completed = await run.invoke(_completed_workflow_state("succeeded"))
+        failed = await failed_run.invoke(_completed_workflow_state("failed"))
+    finally:
+        await run.close()
+        await failed_run.close()
+
+    assert completed["final_result_states"] == [
+        {
+            "task": _task(),
+            "verdict": {
+                "status": VerdictStatus.SUCCEEDED_WITH_AVOIDABLE_DIFFICULTY,
+                "summary": "Order completed.",
+                "barriers": [_direct_barrier(), _confirmed_barrier()],
+            },
+        }
+    ]
+    assert failed["final_result_states"][0]["verdict"]["status"] is VerdictStatus.FAILED
+
+
 async def _expose_native_retrospective_subgraph_state(tmp: Path):
     run = await create_workflow_run(
         _config(tmp / "trajectory.jsonl"),
@@ -246,7 +277,8 @@ async def _keep_llm_context_local(tmp: Path):
     ]
     state["retrospective_states"] = [initial_retrospective_state(_task(), solve_task_history)]
     state["verification_states"] = []
-    state["final_result_states"] = [{"foreign": "Must not enter the prompt."}]
+    state["discovery_state"] = {"foreign": "Must not enter the prompt."}
+    state["final_result_states"] = []
     run = await create_workflow_run(
         _config(tmp / "trajectory.jsonl"),
         "run-456",
@@ -302,6 +334,76 @@ def _completed_retrospective_state(candidates):
     }
 
 
+def _completed_workflow_state(solve_status):
+    return {
+        "discovery_state": {},
+        "solve_states": [{"task": _task(), "history": _completed_solve_history(solve_status)}],
+        "retrospective_states": [_completed_retrospective_state([_candidate("confirmation")])],
+        "verification_states": [_confirmed_verification_state()],
+        "final_result_states": [],
+    }
+
+
+def _completed_solve_history(status):
+    return [
+        {
+            "origin": MessageOrigin.ASSISTANT,
+            "name": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "direct", "tool": {"name": "report_barrier", "description": ""}, "arguments": _direct_barrier()}
+            ],
+        },
+        {
+            "origin": MessageOrigin.ASSISTANT,
+            "name": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "solve-complete",
+                    "tool": {"name": "complete_solve_task", "description": ""},
+                    "arguments": {"status": status, "summary": "Order completed."},
+                }
+            ],
+        },
+    ]
+
+
+def _confirmed_verification_state():
+    return {
+        "task": _task(),
+        "candidate_reference": 0,
+        "candidate": _candidate("confirmation"),
+        "history": [],
+        "outcome": {
+            "candidate_reference": 0,
+            "status": VerificationOutcomeStatus.CONFIRMED,
+            "evidence": "NVDA did not announce the confirmation.",
+            "confirmed_barrier": _confirmed_barrier(),
+        },
+    }
+
+
+def _direct_barrier():
+    return {
+        "description": "The payment button has no accessible name.",
+        "expected_behavior": "NVDA announces the payment button.",
+        "actual_behavior": "NVDA announces only button.",
+        "reproduction_steps": ["Navigate to payment."],
+        "evidence": "Speech: button.",
+    }
+
+
+def _confirmed_barrier():
+    return {
+        "description": "The order confirmation is not announced.",
+        "expected_behavior": "NVDA announces the confirmation.",
+        "actual_behavior": "No confirmation is announced.",
+        "reproduction_steps": ["Submit the order."],
+        "evidence": "Speech remains on the submit button.",
+    }
+
+
 def _nvda_tool():
     return {"name": "read_speech", "description": "", "tool_function": lambda: None}
 
@@ -334,7 +436,7 @@ def _workflow_state():
         "solve_states": [{"task": _task(), "history": _solve_history()}],
         "retrospective_states": [initial_retrospective_state(_task(), _solve_history())],
         "verification_states": [],
-        "final_result_states": [{}],
+        "final_result_states": [],
     }
 
 

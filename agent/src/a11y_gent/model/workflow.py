@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import NotRequired, TypedDict
 
-from a11y_gent.model.verdict import Barrier
+from a11y_gent.model.verdict import Barrier, Verdict
 
 
 class WorkflowPhase(Enum):
@@ -73,6 +73,13 @@ class VerificationOutcome(TypedDict):
     evidence: str
     confirmed_barrier: NotRequired[Barrier]
     execution_error: NotRequired[ExecutionError]
+
+
+class TaskResult(TypedDict):
+    """The final task verdict derived from completed workflow phases."""
+
+    task: WorkflowTask
+    verdict: Verdict
 
 
 class BarrierEnrichment(TypedDict):

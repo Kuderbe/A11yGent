@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from operator import add
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, TypedDict
 
 import aiosqlite
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -16,13 +16,16 @@ from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.config import RunConfig
 from a11y_gent.model.workflow_runtime import (
     RetrospectiveSubstate,
+    SolveTaskSubstate,
     VerificationSubstate,
     WorkflowRuntimeState,
     replace_retrospective_states,
 )
+from a11y_gent.model.workflow import TaskResult, VerificationOutcome
 from a11y_gent.model.tool import Tool
 from a11y_gent.prompts import make_retrospective_completion_tool, make_verify_completion_tool
 from a11y_gent.task_retrospective import RetrospectiveState, build_retrospective_graph
+from a11y_gent.task_results import derive_task_result
 from a11y_gent.task_verification import (
     VerificationState,
     build_verification_graph,
@@ -60,6 +63,7 @@ class WorkflowRun:
             serde=JsonPlusSerializer(
                 allowed_msgpack_modules=[
                     ("a11y_gent.model.message", "MessageOrigin"),
+                    ("a11y_gent.model.verdict", "VerdictStatus"),
                     ("a11y_gent.model.workflow", "VerificationOutcomeStatus"),
                 ]
             ),
@@ -123,9 +127,11 @@ def build_workflow_supergraph(dependencies: WorkflowDependencies, checkpointer: 
     graph = StateGraph(WorkflowRuntimeState)
     graph.add_node("retrospective", _retrospective_subgraph(dependencies))
     graph.add_node("verification", _verification_subgraph(dependencies))
-    graph.add_conditional_edges(START, _initial_sends, ["retrospective", "verification"])
-    graph.add_conditional_edges("retrospective", _verification_sends, ["verification", END])
-    graph.add_conditional_edges("verification", _verification_sends, ["verification", END])
+    graph.add_node("final_result", _final_result_subgraph())
+    graph.add_conditional_edges(START, _initial_sends, ["retrospective", "verification", "final_result"])
+    graph.add_conditional_edges("retrospective", _next_sends, ["verification", "final_result", END])
+    graph.add_conditional_edges("verification", _next_sends, ["verification", "final_result", END])
+    graph.add_edge("final_result", END)
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -139,7 +145,11 @@ def _retrospective_sends(state: WorkflowRuntimeState) -> list[Send]:
 
 def _initial_sends(state: WorkflowRuntimeState) -> list[Send]:
     retrospective_sends = _retrospective_sends(state)
-    return retrospective_sends or _verification_sends(state)
+    return retrospective_sends or _next_sends(state)
+
+
+def _next_sends(state: WorkflowRuntimeState) -> list[Send]:
+    return _verification_sends(state) or _final_result_sends(state)
 
 
 def _retrospective_subgraph(dependencies: WorkflowDependencies):
@@ -183,6 +193,32 @@ def _retrospective_completed(state: RetrospectiveSubstate) -> bool:
     )
 
 
+def _final_result_sends(state: WorkflowRuntimeState) -> list[Send]:
+    completed = {result["task"]["number"] for result in state["final_result_states"]}
+    verifications_by_task = {}
+    for verification in state["verification_states"]:
+        verifications_by_task.setdefault(verification["task"]["number"], []).append(verification)
+    solve_states = {solve_state["task"]["number"]: solve_state for solve_state in state["solve_states"]}
+    sends = []
+    for retrospective_state in sorted(state["retrospective_states"], key=lambda state: state["task"]["number"]):
+        task = retrospective_state["task"]
+        if task["number"] in completed or not _retrospective_completed(retrospective_state):
+            continue
+        verifications = verifications_by_task.get(task["number"], [])
+        if len(verifications) != len(retrospective_state["candidates"]):
+            continue
+        sends.append(
+            Send(
+                "final_result",
+                {
+                    "solve_state": solve_states[task["number"]],
+                    "verification_outcomes": [verification["outcome"] for verification in verifications],
+                },
+            )
+        )
+    return sends
+
+
 def _verification_subgraph(dependencies: WorkflowDependencies):
     child_graph = build_verification_graph(
         dependencies.verification_llm,
@@ -211,6 +247,22 @@ class VerificationSubgraphState(VerificationState):
     verification_states: Annotated[list[VerificationSubstate], add]
 
 
+class FinalResultSubgraphState(TypedDict):
+    """Inputs and output for deterministic final task-result derivation."""
+
+    solve_state: SolveTaskSubstate
+    verification_outcomes: list[VerificationOutcome]
+    final_result_states: Annotated[list[TaskResult], add]
+
+
+def _final_result_subgraph():
+    graph = StateGraph(FinalResultSubgraphState)
+    graph.add_node("derive", _final_result_node)
+    graph.add_edge(START, "derive")
+    graph.add_edge("derive", END)
+    return graph.compile()
+
+
 def _collect_retrospective_state(state: RetrospectiveSubgraphState) -> dict:
     return {
         "retrospective_states": [
@@ -236,6 +288,19 @@ def _collect_verification_state(state: VerificationSubgraphState) -> dict:
                 "history": state["history"],
                 "outcome": state["outcome"],
             },
+        ]
+    }
+
+
+def _final_result_node(state: FinalResultSubgraphState) -> dict:
+    solve_state = state["solve_state"]
+    return {
+        "final_result_states": [
+            derive_task_result(
+                solve_state["task"],
+                solve_state["history"],
+                state["verification_outcomes"],
+            )
         ]
     }
 

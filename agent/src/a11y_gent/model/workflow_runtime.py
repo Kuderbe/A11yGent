@@ -4,7 +4,7 @@ from operator import add
 from typing import Annotated, TypedDict
 
 from a11y_gent.model.message import Message
-from a11y_gent.model.workflow import Candidate, VerificationOutcome, WorkflowTask
+from a11y_gent.model.workflow import Candidate, TaskResult, VerificationOutcome, WorkflowTask
 
 
 class SolveTaskSubstate(TypedDict):
@@ -50,4 +50,4 @@ class WorkflowRuntimeState(TypedDict):
     solve_states: list[SolveTaskSubstate]
     retrospective_states: Annotated[list[RetrospectiveSubstate], replace_retrospective_states]
     verification_states: Annotated[list[VerificationSubstate], add]
-    final_result_states: list[dict[str, object]]
+    final_result_states: Annotated[list[TaskResult], add]
