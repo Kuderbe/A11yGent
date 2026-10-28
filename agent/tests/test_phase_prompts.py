@@ -148,6 +148,11 @@ def test_verify_prompt_receives_only_task_candidate_and_brief():
     }
     assert "a few complete-sentence high-level reproduction steps" in tool["description"]
     assert "Never provide individual characters, words" in tool["description"]
+    schema = OpenaiLlmClient._convert_tool(tool)["function"]["parameters"]
+    assert schema["properties"]["reproduction_steps"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
 
 
 def test_report_enrichment_prompt_cannot_change_the_confirmed_barrier():

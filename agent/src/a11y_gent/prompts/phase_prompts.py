@@ -163,7 +163,7 @@ def make_verify_completion_tool() -> Tool:
         description: str = "",
         expected_behavior: str = "",
         actual_behavior: str = "",
-        reproduction_steps: list | None = None,
+        reproduction_steps: list[str] = None,
     ) -> str:
         """Record the conclusion and supporting evidence for one candidate."""
         return "verification completed"

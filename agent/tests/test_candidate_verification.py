@@ -174,6 +174,18 @@ def test_verify_candidate_rejects_an_incomplete_confirmed_barrier():
         raise AssertionError("Verification must not confirm an incomplete barrier")
 
 
+def test_verify_candidate_rejects_string_reproduction_steps():
+    barrier = {**_barrier(), "reproduction_steps": "Submit the form and observe NVDA."}
+    llm = _ScriptedLlm([[_completion_call("confirmed", **barrier)]])
+
+    try:
+        _verify(llm)
+    except RuntimeError as error:
+        assert "reproduction steps as a non-empty list" in str(error)
+    else:
+        raise AssertionError("Verification must not split a reproduction-step string into characters")
+
+
 def test_verify_candidate_rejects_model_claimed_unverified_status():
     llm = _ScriptedLlm([[_completion_call("unverified_budget_exhausted")]])
 

@@ -204,11 +204,16 @@ def _barrier(arguments: dict) -> Barrier:
     fields = ("description", "expected_behavior", "actual_behavior", "reproduction_steps", "evidence")
     if any(not arguments.get(field) for field in fields):
         raise RuntimeError("Confirmed verification requires a complete barrier")
+    reproduction_steps = arguments["reproduction_steps"]
+    if not isinstance(reproduction_steps, list) or any(
+        not isinstance(step, str) or not step.strip() for step in reproduction_steps
+    ):
+        raise RuntimeError("Confirmed verification requires reproduction steps as a non-empty list of sentences")
     return {
         "description": str(arguments["description"]),
         "expected_behavior": str(arguments["expected_behavior"]),
         "actual_behavior": str(arguments["actual_behavior"]),
-        "reproduction_steps": [str(step) for step in arguments["reproduction_steps"]],
+        "reproduction_steps": reproduction_steps,
         "evidence": str(arguments["evidence"]),
     }
 
