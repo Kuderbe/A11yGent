@@ -25,6 +25,7 @@ class DiscoveryState(TypedDict):
     completed: bool
     pending_tool_calls: list["DiscoveryToolCall"]
     pending_observations: list[Message]
+    reason_action: Message | None
     step_count: int
 
 
@@ -49,7 +50,7 @@ async def discover_tasks(
 
 def build_discovery_graph(config: RunConfig, llm: LlmClient, tools: list[Tool]):
     graph = StateGraph(DiscoveryState)
-    graph.add_node("reason", _reason_node(llm, config.model))
+    graph.add_node("reason", _reason_node(llm, config.model, tools))
     graph.add_node("act", _act_node(llm, config.model, tools))
     graph.add_node("observe", _observe_node(llm, config.application_url, tools))
     graph.add_edge(START, "reason")
@@ -73,14 +74,24 @@ def initial_discovery_state(config: RunConfig) -> DiscoveryState:
         "completed": False,
         "pending_tool_calls": [],
         "pending_observations": [],
+        "reason_action": None,
         "step_count": 0,
     }
 
 
-def _reason_node(llm: LlmClient, model: str):
+def _reason_node(llm: LlmClient, model: str, tools: list[Tool]):
     async def reason(state: DiscoveryState) -> DiscoveryState:
-        response = await llm.infer(state["history"], model, use_tools=False)
-        return {**state, "history": [*state["history"], response["message"]]}
+        try:
+            response = await llm.infer(state["history"], model)
+        except ToolCallConversionError as error:
+            action, _ = rejected_action(error)
+            return {**state, "reason_action": action}
+        action = _action_message(response["message"], response.get("tool_calls", []))
+        return {
+            **state,
+            "history": [*state["history"], _action_message(response["message"], [])],
+            "reason_action": action if action.get("tool_calls") else None,
+        }
 
     return reason
 
@@ -96,15 +107,18 @@ def _act_node(llm: LlmClient, model: str, tools: list[Tool]):
                 "history": [*state["history"], action],
                 "pending_tool_calls": [],
                 "pending_observations": [observation],
+                "reason_action": None,
                 "step_count": state["step_count"] + 1,
             }
         action = _action_message(response["message"], response.get("tool_calls", []))
-        validation = validate_action(action, {tool["name"]: tool for tool in tools})
+        selected_action = action if action.get("tool_calls") or state["reason_action"] is None else state["reason_action"]
+        validation = validate_action(selected_action, {tool["name"]: tool for tool in tools})
         return {
             **state,
-            "history": [*state["history"], action],
+            "history": [*state["history"], selected_action],
             "pending_tool_calls": [_serialize_tool_call(call) for call in validation["pending_tool_calls"]],
             "pending_observations": validation["observations"],
+            "reason_action": None,
             "step_count": state["step_count"] + 1,
         }
 

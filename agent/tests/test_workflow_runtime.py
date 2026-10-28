@@ -164,7 +164,7 @@ class _InterruptingSolveLlm(LlmClient):
 
     async def infer(self, history, model, use_tools=True):
         task = "first" if "First task" in history[0]["content"] else "second"
-        if not use_tools:
+        if not any(message["origin"] is MessageOrigin.ASSISTANT for message in history):
             self.started_tasks.append(task)
             return {
                 "message": {

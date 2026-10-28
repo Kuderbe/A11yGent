@@ -58,8 +58,8 @@ def test_solve_task_prompt_uses_only_the_task_and_reports_observed_barriers():
     assert "'failed' only when the task cannot be completed" in prompt
     assert "Do not use succeeded_with_avoidable_difficulty here" in prompt
     assert "DevTools" not in prompt
-    assert "return only concise plain text" in prompt
-    assert "never tool-call, XML, JSON, or code markup" in prompt
+    assert "Tool calls belong in Act" in prompt
+    assert "rather than textual tool-call, XML, JSON, or code markup in Reason" in prompt
     _assert_interactive_cycle(prompt)
 
     tool = make_solve_task_completion_tool()

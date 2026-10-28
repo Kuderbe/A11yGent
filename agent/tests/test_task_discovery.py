@@ -16,10 +16,12 @@ class _ScriptedLlm(LlmClient):
         self.responses = list(responses)
         self.executed_calls = []
         self.histories = []
+        self.reason_turn = True
 
     async def infer(self, history, model, use_tools=True):
         self.histories.append(history)
-        if not use_tools:
+        if self.reason_turn:
+            self.reason_turn = False
             return {
                 "message": {
                     "origin": MessageOrigin.ASSISTANT,
@@ -27,6 +29,7 @@ class _ScriptedLlm(LlmClient):
                     "content": "I will inspect the application before selecting the next action.",
                 }
             }
+        self.reason_turn = True
         calls = self.responses.pop(0)
         return {
             "message": {
@@ -116,7 +119,7 @@ def test_discover_tasks_observes_a_rejected_batch_before_completion():
 
     assert discovery.tasks[0]["description"] == "Review account settings."
     assert llm.executed_calls == ["complete_discovery"]
-    assert "received 2" in llm.histories[2][-1]["content"]
+    assert "received 2" in _observation(llm, "received 2")["content"]
 
 
 def test_discover_tasks_counts_a_rejected_action_against_its_budget():
@@ -140,8 +143,8 @@ def test_discover_tasks_observes_unknown_and_invalid_argument_calls_before_compl
 
     assert discovery.tasks[0]["description"] == "Create an account."
     assert llm.executed_calls == ["complete_discovery"]
-    assert "unknown tool 'missing'" in llm.histories[2][-1]["content"]
-    assert "invalid arguments for 'inspect_page'" in llm.histories[4][-1]["content"]
+    assert "unknown tool 'missing'" in _observation(llm, "unknown tool 'missing'")["content"]
+    assert "invalid arguments for 'inspect_page'" in _observation(llm, "invalid arguments for 'inspect_page'")["content"]
 
 
 def test_discover_tasks_returns_partial_tasks_when_budget_ends_after_checkpoint():
@@ -195,7 +198,11 @@ def test_discover_tasks_keeps_serialized_tool_call_text_in_reasoning():
     discovery = _discover(_config(), llm)
 
     assert discovery.tasks == [{"number": 1, "url": "https://shop.example/", "description": "Browse products."}]
-    assert llm.histories[1][-1]["content"] == '<tool_call name="inspect_page">'
+    assert any(
+        message["content"] == '<tool_call name="inspect_page">'
+        for history in llm.histories
+        for message in history
+    )
 
 
 def _config(discovery_max_steps=150):
@@ -224,26 +231,16 @@ def _devtools_call():
 class _LeakingReasoningLlm(LlmClient):
     def __init__(self):
         self.histories = []
+        self.reason_turn = True
 
     async def infer(self, history, model, use_tools=True):
         self.histories.append(history)
-        if use_tools:
-            return {
-                "message": {
-                    "origin": MessageOrigin.ASSISTANT,
-                    "name": "assistant",
-                    "content": "",
-                    "tool_calls": [_completion_call(["Browse products."], incomplete=False)],
-                },
-                "tool_calls": [_completion_call(["Browse products."], incomplete=False)],
-            }
-        return {
-            "message": {
-                "origin": MessageOrigin.ASSISTANT,
-                "name": "assistant",
-                "content": '<tool_call name="inspect_page">',
-            }
-        }
+        if self.reason_turn:
+            self.reason_turn = False
+            return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": '<tool_call name="inspect_page">'}}
+        self.reason_turn = True
+        call = _completion_call(["Browse products."], incomplete=False)
+        return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]}, "tool_calls": [call]}
 
     async def execute_tool_call(self, tool_call):
         return {
@@ -287,6 +284,15 @@ def _discover(config, llm):
             )
 
         return asyncio.run(run_discovery())
+
+
+def _observation(llm, text):
+    return next(
+        message
+        for history in llm.histories
+        for message in history
+        if text in message["content"]
+    )
 
 
 def _run_all():

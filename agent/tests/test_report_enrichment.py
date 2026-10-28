@@ -12,10 +12,12 @@ class _CompletionLlm(LlmClient):
         self.histories = []
         self.executed_calls = []
         self.action_count = 0
+        self.reason_turn = True
 
     async def infer(self, history, model, use_tools=True):
         self.histories.append(history)
-        if not use_tools:
+        if self.reason_turn:
+            self.reason_turn = False
             return {
                 "message": {
                     "origin": MessageOrigin.ASSISTANT,
@@ -23,6 +25,7 @@ class _CompletionLlm(LlmClient):
                     "content": "I will inspect the implementation details.",
                 }
             }
+        self.reason_turn = True
         self.action_count += 1
         if self.action_count == 1:
             call = {"id": "inspect-page", "tool": _devtools_tool(), "arguments": {}}
@@ -79,11 +82,14 @@ class _RecoveringLlm(LlmClient):
         self.histories = []
         self.executed_calls = []
         self.action_count = 0
+        self.reason_turn = True
 
     async def infer(self, history, model, use_tools=True):
         self.histories.append(history)
-        if not use_tools:
+        if self.reason_turn:
+            self.reason_turn = False
             return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "I will revise the next action."}}
+        self.reason_turn = True
         self.action_count += 1
         if self.action_count == 1:
             calls = [
@@ -156,7 +162,7 @@ def test_enrichment_observes_a_rejected_action_before_completion():
 
     assert enrichment["suggested_fix"] == "Provide an accessible name."
     assert llm.executed_calls == ["complete_report_enrichment"]
-    assert "received 2" in llm.histories[2][-1]["content"]
+    assert "received 2" in _observation(llm, "received 2")["content"]
 
 
 def test_enrichment_counts_a_rejected_action_against_its_budget():
@@ -179,6 +185,15 @@ def _barrier():
 
 def _devtools_tool():
     return {"name": "inspect_page", "description": "", "tool_function": lambda: None}
+
+
+def _observation(llm, text):
+    return next(
+        message
+        for history in llm.histories
+        for message in history
+        if text in message["content"]
+    )
 
 
 def _run_all():

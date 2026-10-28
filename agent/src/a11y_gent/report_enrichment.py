@@ -22,6 +22,7 @@ class ReportEnrichmentState(TypedDict):
     history: list[Message]
     pending_tool_calls: list["EnrichmentToolCall"]
     pending_observations: list[Message]
+    reason_action: Message | None
     enrichment: BarrierEnrichment | None
     step_count: int
 
@@ -49,7 +50,7 @@ async def enrich_confirmed_barrier(
 def build_report_enrichment_graph(llm: LlmClient, model: str, devtools_tools: list[Tool], max_steps: int):
     """Build one DevTools-only enrichment graph."""
     graph = StateGraph(ReportEnrichmentState)
-    graph.add_node("reason", _reason_node(llm, model))
+    graph.add_node("reason", _reason_node(llm, model, [*devtools_tools, make_report_enrichment_completion_tool()]))
     graph.add_node("act", _act_node(llm, model, [*devtools_tools, make_report_enrichment_completion_tool()]))
     graph.add_node("observe", _observe_node(llm, [*devtools_tools, make_report_enrichment_completion_tool()]))
     graph.add_edge(START, "reason")
@@ -72,18 +73,26 @@ def initial_report_enrichment_state(barrier: Barrier) -> ReportEnrichmentState:
         ],
         "pending_tool_calls": [],
         "pending_observations": [],
+        "reason_action": None,
         "enrichment": None,
         "step_count": 0,
     }
 
 
-def _reason_node(llm: LlmClient, model: str):
+def _reason_node(llm: LlmClient, model: str, tools: list[Tool]):
     async def reason(state: ReportEnrichmentState) -> dict:
         try:
-            response = await llm.infer(state["history"], model, use_tools=False)
+            response = await llm.infer(state["history"], model)
+        except ToolCallConversionError as error:
+            action, _ = rejected_action(error)
+            return {"reason_action": action}
         except Exception as error:
             return {"enrichment": _manual_investigation_enrichment(state["barrier"], str(error))}
-        return {"history": [*state["history"], response["message"]]}
+        action = _action_message(response["message"], response.get("tool_calls", []))
+        return {
+            "history": [*state["history"], _action_message(response["message"], [])],
+            "reason_action": action if action.get("tool_calls") else None,
+        }
 
     return reason
 
@@ -98,17 +107,20 @@ def _act_node(llm: LlmClient, model: str, tools: list[Tool]):
                 "history": [*state["history"], action],
                 "pending_tool_calls": [],
                 "pending_observations": [observation],
+                "reason_action": None,
                 "step_count": state["step_count"] + 1,
             }
         except Exception as error:
             return {"enrichment": _manual_investigation_enrichment(state["barrier"], str(error))}
         tool_calls = response.get("tool_calls", [])
         action = _action_message(response["message"], tool_calls)
-        validation = validate_action(action, {tool["name"]: tool for tool in tools})
+        selected_action = action if tool_calls or state["reason_action"] is None else state["reason_action"]
+        validation = validate_action(selected_action, {tool["name"]: tool for tool in tools})
         return {
-            "history": [*state["history"], action],
+            "history": [*state["history"], selected_action],
             "pending_tool_calls": [_serialize_tool_call(call) for call in validation["pending_tool_calls"]],
             "pending_observations": validation["observations"],
+            "reason_action": None,
             "step_count": state["step_count"] + 1,
         }
 

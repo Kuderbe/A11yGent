@@ -15,11 +15,13 @@ class _ScriptedLlm(LlmClient):
     def __init__(self, responses):
         self.responses = list(responses)
         self.executed_calls = []
+        self.reason_turn = True
         self.histories = []
 
     async def infer(self, history, model, use_tools=True):
         self.histories.append(history)
-        if not use_tools:
+        if self.reason_turn:
+            self.reason_turn = False
             return {
                 "message": {
                     "origin": MessageOrigin.ASSISTANT,
@@ -27,6 +29,7 @@ class _ScriptedLlm(LlmClient):
                     "content": "I will take the next NVDA action.",
                 }
             }
+        self.reason_turn = True
         calls = self.responses.pop(0)
         return {
             "message": {
@@ -57,7 +60,13 @@ def test_solve_task_records_direct_barriers_and_continues_to_completion():
     assert result["summary"] == "Order placed."
     assert result["barriers"] == [_barrier()]
     assert llm.executed_calls == ["report_barrier", "read_speech", "complete_solve_task"]
-    barrier_call = llm.histories[2][-2]["tool_calls"][0]
+    barrier_call = next(
+        call
+        for history in llm.histories
+        for message in history
+        for call in message.get("tool_calls", [])
+        if call["tool"]["name"] == "report_barrier"
+    )
     assert barrier_call["tool"] == {"name": "report_barrier", "description": ""}
     assert "tool_function" not in barrier_call["tool"]
 
@@ -92,7 +101,7 @@ def test_solve_task_observes_a_rejected_multiple_call_before_retrying():
 
     assert result["status"] is VerdictStatus.SUCCEEDED
     assert llm.executed_calls == ["complete_solve_task"]
-    observation = llm.histories[2][-1]
+    observation = _observation(llm, "received 2")
     assert observation["origin"] is MessageOrigin.TOOL
     assert "received 2" in observation["content"]
 
@@ -104,10 +113,9 @@ def test_solve_task_observes_a_rejected_missing_call_before_retrying():
 
     assert result["status"] is VerdictStatus.SUCCEEDED
     assert llm.executed_calls == ["complete_solve_task"]
-    observation = llm.histories[2][-1]
+    observation = _observation(llm, "received 0")
     assert observation["name"] == "action_contract"
     assert "received 0" in observation["content"]
-    assert "tool_calls" not in llm.histories[2][-2]
 
 
 def test_solve_task_counts_a_rejected_action_against_its_budget():
@@ -128,8 +136,27 @@ def test_solve_task_observes_unknown_and_invalid_argument_calls_before_retrying(
 
     assert result["status"] is VerdictStatus.SUCCEEDED
     assert llm.executed_calls == ["complete_solve_task"]
-    assert "unknown tool 'missing'" in llm.histories[2][-1]["content"]
-    assert "invalid arguments for 'read_speech'" in llm.histories[4][-1]["content"]
+    assert "unknown tool 'missing'" in _observation(llm, "unknown tool 'missing'")["content"]
+    assert "invalid arguments for 'read_speech'" in _observation(llm, "invalid arguments for 'read_speech'")["content"]
+
+
+def test_solve_task_uses_reason_call_when_act_has_no_call():
+    llm = _ReasonFallbackLlm()
+
+    result = _solve(llm)
+
+    assert result["status"] is VerdictStatus.SUCCEEDED
+    assert llm.act_turns == 1
+    assert llm.executed_calls == ["complete_solve_task"]
+
+
+def test_solve_task_prefers_act_call_over_reason_call():
+    llm = _ReasonAndActLlm()
+
+    result = _solve(llm)
+
+    assert result["summary"] == "Act completed the task."
+    assert llm.executed_calls == ["complete_solve_task"]
 
 
 def _solve(llm, nvda_max_steps=3):
@@ -139,6 +166,15 @@ def _solve(llm, nvda_max_steps=3):
             return await solve_task(config, llm, _task(), [_nvda_call()["tool"]])
 
         return asyncio.run(run())
+
+
+def _observation(llm, text):
+    return next(
+        message
+        for history in llm.histories
+        for message in history
+        if text in message["content"]
+    )
 
 
 def _solve_two_tasks(llm):
@@ -197,6 +233,47 @@ def _completion_call(status, summary):
         "tool": {"name": "complete_solve_task", "description": "", "tool_function": lambda: None},
         "arguments": {"status": status, "summary": summary},
     }
+
+
+class _ReasonFallbackLlm(LlmClient):
+    def __init__(self):
+        self.histories = []
+        self.executed_calls = []
+        self.act_turns = 0
+
+    async def infer(self, history, model, use_tools=True):
+        self.histories.append(history)
+        if len(self.histories) == 1:
+            call = _completion_call("succeeded", "Order placed.")
+            return {
+                "message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]},
+                "tool_calls": [call],
+            }
+        self.act_turns += 1
+        return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": ""}}
+
+    async def execute_tool_call(self, tool_call):
+        self.executed_calls.append(tool_call["tool"]["name"])
+        return {"origin": MessageOrigin.TOOL, "name": tool_call["tool"]["name"], "content": "done", "reference_id": tool_call["id"]}
+
+
+class _ReasonAndActLlm(LlmClient):
+    def __init__(self):
+        self.histories = []
+        self.executed_calls = []
+
+    async def infer(self, history, model, use_tools=True):
+        self.histories.append(history)
+        summary = "Reason completed the task." if len(self.histories) == 1 else "Act completed the task."
+        call = _completion_call("succeeded", summary)
+        return {
+            "message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]},
+            "tool_calls": [call],
+        }
+
+    async def execute_tool_call(self, tool_call):
+        self.executed_calls.append(tool_call["tool"]["name"])
+        return {"origin": MessageOrigin.TOOL, "name": tool_call["tool"]["name"], "content": "done", "reference_id": tool_call["id"]}
 
 
 def _barrier():

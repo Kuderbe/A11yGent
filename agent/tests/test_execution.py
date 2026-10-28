@@ -281,17 +281,21 @@ def _phased_llm(base_url, api_key, tools, headers):
 class _PhasedLlm:
     def __init__(self, tools):
         self.tools = tools
+        self.reason_turn = True
 
     async def infer(self, history, model, use_tools=True):
-        if not use_tools:
-            return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "I will complete this phase."}}
         phase = history[0]["name"]
+        if phase == "retrospective":
+            assert self.tools == {"create_candidate", "complete_retrospective"}
+            call = _phase_call("complete_retrospective", {})
+            return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]}, "tool_calls": [call]}
+        if self.reason_turn:
+            self.reason_turn = False
+            return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "I will complete this phase."}}
+        self.reason_turn = True
         if phase == "solve_task":
             assert self.tools == {"report_barrier", "complete_solve_task"}
             call = _phase_call("complete_solve_task", {"status": "succeeded", "summary": "Checkout completed."})
-        elif phase == "retrospective":
-            assert self.tools == {"create_candidate", "complete_retrospective"}
-            call = _phase_call("complete_retrospective", {})
         else:
             raise AssertionError(f"Unexpected phase {phase}")
         return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]}, "tool_calls": [call]}

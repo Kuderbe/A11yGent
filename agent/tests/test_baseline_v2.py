@@ -77,14 +77,20 @@ def _context(config, report_path):
 
 
 class _PhasedLlm(LlmClient):
+    def __init__(self):
+        self.reason_turn = True
+
     async def infer(self, history, model, use_tools=True):
-        if not use_tools:
-            return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "I will complete this phase."}}
         phase = history[0]["name"]
+        if phase == "retrospective":
+            call = _call("complete_retrospective", {})
+            return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]}, "tool_calls": [call]}
+        if self.reason_turn:
+            self.reason_turn = False
+            return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "I will complete this phase."}}
+        self.reason_turn = True
         if phase == "solve_task":
             call = _call("complete_solve_task", {"status": "succeeded", "summary": "Checkout completed."})
-        elif phase == "retrospective":
-            call = _call("complete_retrospective", {})
         else:
             raise AssertionError(f"Unexpected phase {phase}")
         return {"message": {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": "", "tool_calls": [call]}, "tool_calls": [call]}

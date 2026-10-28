@@ -16,10 +16,12 @@ class _ScriptedLlm(LlmClient):
         self.responses = list(responses)
         self.executed_calls = []
         self.histories = []
+        self.reason_turn = True
 
     async def infer(self, history, model, use_tools=True):
         self.histories.append(history)
-        if not use_tools:
+        if self.reason_turn:
+            self.reason_turn = False
             return {
                 "message": {
                     "origin": MessageOrigin.ASSISTANT,
@@ -27,6 +29,7 @@ class _ScriptedLlm(LlmClient):
                     "content": "I will inspect the suspected condition with NVDA.",
                 }
             }
+        self.reason_turn = True
         calls = self.responses.pop(0)
         return {
             "message": {
@@ -98,7 +101,7 @@ def test_verify_candidate_observes_a_rejected_multiple_call_before_retrying():
 
     assert outcome["status"] is VerificationOutcomeStatus.DISCARDED
     assert llm.executed_calls == ["complete_verification"]
-    observation = llm.histories[2][-1]
+    observation = _observation(llm, "received 2")
     assert observation["origin"] is MessageOrigin.TOOL
     assert "received 2" in observation["content"]
 
@@ -110,7 +113,7 @@ def test_verify_candidate_observes_a_rejected_missing_call_before_retrying():
 
     assert outcome["status"] is VerificationOutcomeStatus.DISCARDED
     assert llm.executed_calls == ["complete_verification"]
-    observation = llm.histories[2][-1]
+    observation = _observation(llm, "received 0")
     assert observation["name"] == "action_contract"
     assert "received 0" in observation["content"]
 
@@ -130,8 +133,8 @@ def test_verify_candidate_observes_unknown_and_invalid_argument_calls_before_ret
 
     assert outcome["status"] is VerificationOutcomeStatus.DISCARDED
     assert llm.executed_calls == ["complete_verification"]
-    assert "unknown tool 'missing'" in llm.histories[2][-1]["content"]
-    assert "invalid arguments for 'read_speech'" in llm.histories[4][-1]["content"]
+    assert "unknown tool 'missing'" in _observation(llm, "unknown tool 'missing'")["content"]
+    assert "invalid arguments for 'read_speech'" in _observation(llm, "invalid arguments for 'read_speech'")["content"]
 
 
 def test_verify_candidate_records_tool_failure_as_unverified_execution_error():
@@ -229,6 +232,15 @@ def _verify(llm, nvda_max_steps=3):
             )
 
         return asyncio.run(run())
+
+
+def _observation(llm, text):
+    return next(
+        message
+        for history in llm.histories
+        for message in history
+        if text in message["content"]
+    )
 
 
 def _config(tmp, nvda_max_steps):
