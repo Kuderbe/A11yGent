@@ -71,8 +71,10 @@ def build_retrospective_prompt(task: WorkflowTask, solve_task_history: list[Mess
         f"Solve-task history:\n{_format_history(solve_task_history)}\n\n"
         "Identify only unreported suspected conditions that need targeted checking. "
         "Return candidates only. Do not report a confirmed barrier. For each candidate, call "
-        "create_candidate with one description and verification brief. When no further "
-        "candidates remain, call complete_retrospective."
+        "create_candidate with one description and verification brief. In every action turn, "
+        "make exactly one tool call. Create at most one candidate in that call, then wait for "
+        "its observation before the next analysis iteration. When no further candidates remain, "
+        "call complete_retrospective without candidate values."
     )
 
 
