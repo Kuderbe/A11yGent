@@ -113,9 +113,12 @@ class OpenaiLlmClient(LlmClient):
 
     @staticmethod
     def _convert_message(message: Message) -> ChatCompletionMessageParam:
+        content = message["content"] or ""
+        if message["origin"] == MessageOrigin.ASSISTANT and message.get("tool_calls") and not content:
+            content = "Tool call."
         res: dict[str, Any] = {
             "role": str(message["origin"]),
-            "content": message["content"] or "",
+            "content": content,
             "name": message["name"]
         }
 

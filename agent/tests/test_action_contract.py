@@ -80,6 +80,7 @@ def test_rejected_calls_and_observations_convert_to_native_provider_messages():
 
     assert [call["id"] for call in messages[0]["tool_calls"]] == ["first", "second"]
     assert [message["tool_call_id"] for message in messages[1:]] == ["first", "second"]
+    assert messages[0]["content"] == "Tool call."
 
 
 def test_conversion_error_becomes_a_native_action_and_matching_observation():
