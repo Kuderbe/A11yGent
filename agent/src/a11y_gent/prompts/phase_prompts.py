@@ -51,7 +51,8 @@ def build_solve_task_prompt(task: WorkflowTask) -> str:
         "to execute or observe anything. Use only NVDA observations as evidence. Report every directly observed "
         "accessibility barrier immediately with report_barrier, including its description, "
         "expected behavior, actual behavior, executed reproduction steps, and evidence. "
-        "Complete by calling "
+        "In every Act turn, make exactly one tool call and wait for its observation before the next "
+        "Reason step. Complete by calling "
         "complete_solve_task with the task-local status and summary."
     )
 
