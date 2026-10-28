@@ -115,7 +115,7 @@ class OpenaiLlmClient(LlmClient):
     def _convert_message(message: Message) -> ChatCompletionMessageParam:
         res: dict[str, Any] = {
             "role": str(message["origin"]),
-            "content": message["content"],
+            "content": message["content"] or "",
             "name": message["name"]
         }
 

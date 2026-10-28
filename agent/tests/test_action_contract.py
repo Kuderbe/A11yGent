@@ -122,6 +122,14 @@ def test_adapter_preserves_invalid_json_conversion_context():
         raise AssertionError("Expected an invalid JSON conversion error")
 
 
+def test_provider_conversion_replaces_a_null_message_content_with_empty_text():
+    message = {"origin": MessageOrigin.ASSISTANT, "name": "assistant", "content": None}
+
+    converted = OpenaiLlmClient._convert_message(message)
+
+    assert converted["content"] == ""
+
+
 def _call(identifier):
     return {"id": identifier, "tool": {"name": "inspect", "description": ""}, "arguments": {}}
 
