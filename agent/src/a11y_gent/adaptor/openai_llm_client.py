@@ -47,7 +47,7 @@ class OpenaiLlmClient(LlmClient):
         if use_tools:
             tools = [self._convert_tool(tool) for tool in self._tools]
             request["tools"] = tools
-            request["tool_choice"] = "required"
+            request["tool_choice"] = "auto"
         observability.debug(
             "llm.request",
             phase=phase,

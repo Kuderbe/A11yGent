@@ -3,7 +3,7 @@
 Offline: the OpenAI client is replaced by a fake that records the kwargs of
 chat.completions.create and returns a minimal response. Verifies that the
 reasoning-only "think" step omits tool configuration while the action step
-requires one native tool call.
+allows native tool calls.
 
 Run standalone with the stdlib:
 
@@ -73,7 +73,7 @@ def test_use_tools_false_omits_tool_schemas_and_tool_choice():
     assert "tool_choice" not in request
 
 
-def test_use_tools_true_requires_one_native_tool_call():
+def test_use_tools_true_allows_native_tool_calls():
     client = _client_with_fake()
 
     async def _run():
@@ -81,7 +81,7 @@ def test_use_tools_true_requires_one_native_tool_call():
 
     asyncio.run(_run())
     request = client._client.chat.completions.last_kwargs
-    assert request["tool_choice"] == "required"
+    assert request["tool_choice"] == "auto"
     assert request["tools"][0]["function"]["name"] == "inspect"
 
 
@@ -92,7 +92,7 @@ def test_default_uses_tools():
         await client.infer(_HISTORY, "m")
 
     asyncio.run(_run())
-    assert client._client.chat.completions.last_kwargs["tool_choice"] == "required"
+    assert client._client.chat.completions.last_kwargs["tool_choice"] == "auto"
 
 
 def _tool():
