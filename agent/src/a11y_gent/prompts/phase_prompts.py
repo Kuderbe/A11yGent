@@ -146,7 +146,10 @@ def build_verify_prompt(task: WorkflowTask, candidate_reference: int, candidate:
         "get_speech_log or get_focus_info for the next observation. Complete by calling "
         "complete_verification with confirmed or discarded status and supporting NVDA evidence. "
         "A confirmed completion must also provide description, expected_behavior, actual_behavior, "
-        "and a non-empty reproduction_steps list; use discarded when the evidence does not support "
+        "and a non-empty reproduction_steps list. Write a few concise, high-level, complete-sentence steps "
+        "for actions actually performed during verification: for example, navigate to the control, activate it, "
+        "then observe the missing feedback. Do not split a sentence into words or characters, enumerate every "
+        "keystroke, or include unperformed steps. Use discarded when the evidence does not support "
         "a complete confirmed barrier."
     )
 
@@ -171,7 +174,8 @@ def make_verify_completion_tool() -> Tool:
             "Complete verification with status 'confirmed' or 'discarded' and "
             "supporting NVDA evidence. A confirmed outcome must "
             "also provide the barrier description, expected behavior, actual behavior, "
-            "executed reproduction steps, and NVDA evidence."
+            "a few complete-sentence high-level reproduction steps actually performed, and NVDA evidence. "
+            "Never provide individual characters, words, or one entry per keystroke as reproduction steps."
         ),
         tool_function=complete_verification,
     )

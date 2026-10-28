@@ -123,6 +123,8 @@ def test_verify_prompt_receives_only_task_candidate_and_brief():
     assert "NVDA" in prompt
     assert "exactly one tool call" in prompt
     assert "Wait for its observation" in prompt
+    assert "a few concise, high-level, complete-sentence steps" in prompt
+    assert "Do not split a sentence into words or characters" in prompt
     assert "DevTools" not in prompt
     assert "name exactly one next executable" not in prompt
     _assert_interactive_cycle(prompt)
@@ -144,6 +146,8 @@ def test_verify_prompt_receives_only_task_candidate_and_brief():
         "actual_behavior",
         "reproduction_steps",
     }
+    assert "a few complete-sentence high-level reproduction steps" in tool["description"]
+    assert "Never provide individual characters, words" in tool["description"]
 
 
 def test_report_enrichment_prompt_cannot_change_the_confirmed_barrier():
