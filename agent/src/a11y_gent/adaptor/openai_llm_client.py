@@ -1,4 +1,4 @@
-from a11y_gent.adaptor.llm_response import LlmResponse
+from a11y_gent.adaptor.llm_response import LlmResponse, ToolCallConversionError
 from a11y_gent.model.message import Message, MessageOrigin
 from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.model.tool import Tool
@@ -170,15 +170,27 @@ class OpenaiLlmClient(LlmClient):
 
 
     def _convert_tool_call(self, tool_call_id: str, tool_name: str, arguments: str) -> ToolCall:
-        tool = self._get_tool(tool_name)
         observability.debug(
             "tool.arguments_raw", tool=tool_name, call_id=tool_call_id, arguments_raw=arguments
         )
+        try:
+            tool = self._get_tool(tool_name)
+        except ValueError as error:
+            raise ToolCallConversionError(tool_call_id, tool_name, arguments, str(error)) from error
+        try:
+            decoded_arguments = json.loads(arguments or "{}")
+        except json.JSONDecodeError as error:
+            raise ToolCallConversionError(
+                tool_call_id,
+                tool_name,
+                arguments,
+                f"Invalid JSON arguments for '{tool_name}': {error}",
+            ) from error
 
         return {
             "id": tool_call_id,
             "tool": tool,
-            "arguments": json.loads(arguments or "{}"),
+            "arguments": decoded_arguments,
         }
 
 
