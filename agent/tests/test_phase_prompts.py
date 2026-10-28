@@ -54,12 +54,17 @@ def test_solve_task_prompt_uses_only_the_task_and_reports_observed_barriers():
     assert "executed reproduction steps" in prompt
     assert "evidence" in prompt
     assert "complete_solve_task" in prompt
+    assert "status 'succeeded' when NVDA evidence confirms the task goal" in prompt
+    assert "'failed' only when the task cannot be completed" in prompt
+    assert "Do not use succeeded_with_avoidable_difficulty here" in prompt
     assert "DevTools" not in prompt
     _assert_interactive_cycle(prompt)
 
     tool = make_solve_task_completion_tool()
     assert tool["tool_function"](status="succeeded", summary="Order confirmed.") == "solve task completed"
     assert _schema_properties(tool) == {"status", "summary"}
+    assert "'succeeded' after observed task completion" in tool["description"]
+    assert "'failed' only when it cannot be completed" in tool["description"]
 
 
 def test_retrospective_prompt_uses_immutable_solve_history_for_candidates_only():

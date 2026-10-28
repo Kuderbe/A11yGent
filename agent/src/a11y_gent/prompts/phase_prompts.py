@@ -56,7 +56,9 @@ def build_solve_task_prompt(task: WorkflowTask) -> str:
         "expected behavior, actual behavior, executed reproduction steps, and evidence. "
         "In every Act turn, make exactly one tool call and wait for its observation before the next "
         "Reason step. Completion is an ordinary Action and has an Observation. Complete by calling "
-        "complete_solve_task with the task-local status and summary."
+        "complete_solve_task with status 'succeeded' when NVDA evidence confirms the task goal, or 'failed' "
+        "only when the task cannot be completed. Do not use succeeded_with_avoidable_difficulty here: final "
+        "task status is derived later from confirmed barriers. Include a concise evidence-grounded summary."
     )
 
 
@@ -69,7 +71,10 @@ def make_solve_task_completion_tool() -> Tool:
 
     return Tool(
         name="complete_solve_task",
-        description="Complete this task attempt with its status and a concise summary.",
+        description=(
+            "Complete this task attempt with status 'succeeded' after observed task completion or 'failed' "
+            "only when it cannot be completed, plus a concise evidence-grounded summary."
+        ),
         tool_function=complete_solve_task,
     )
 
