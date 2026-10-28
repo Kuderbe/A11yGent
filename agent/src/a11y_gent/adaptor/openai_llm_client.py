@@ -42,27 +42,23 @@ class OpenaiLlmClient(LlmClient):
         self, history: list[Message], model: str, use_tools: bool = True
     ) -> LlmResponse:
         messages = [OpenaiLlmClient._convert_message(m) for m in history]
-        tools = [self._convert_tool(tool) for tool in self._tools]
-
-        # Suppress tool calls for the reasoning-only step; tools stay advertised.
-        tool_choice = "auto" if use_tools else "none"
         phase = "act" if use_tools else "think"
+        request: dict[str, Any] = {"model": model, "messages": messages}
+        if use_tools:
+            tools = [self._convert_tool(tool) for tool in self._tools]
+            request["tools"] = tools
+            request["tool_choice"] = "auto"
         observability.debug(
             "llm.request",
             phase=phase,
             model=model,
-            tool_choice=tool_choice,
             messages=messages,
-            tools=tools,
+            tools=request.get("tools", []),
+            tool_choice=request.get("tool_choice"),
         )
 
         started = time.perf_counter()
-        res = await self._client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools,
-            tool_choice=tool_choice,
-        )
+        res = await self._client.chat.completions.create(**request)
         elapsed_ms = round((time.perf_counter() - started) * 1000)
 
         choice = res.choices[0]

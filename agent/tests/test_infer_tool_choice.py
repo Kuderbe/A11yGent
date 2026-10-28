@@ -54,21 +54,23 @@ class _FakeClient:
 def _client_with_fake():
     client = OpenaiLlmClient.__new__(OpenaiLlmClient)
     client._client = _FakeClient()
-    client._tools = []
+    client._tools = [_tool()]
     return client
 
 
 _HISTORY = [{"origin": MessageOrigin.USER, "name": "user", "content": "hi"}]
 
 
-def test_use_tools_false_sends_tool_choice_none():
+def test_use_tools_false_omits_tool_schemas_and_tool_choice():
     client = _client_with_fake()
 
     async def _run():
         await client.infer(_HISTORY, "m", use_tools=False)
 
     asyncio.run(_run())
-    assert client._client.chat.completions.last_kwargs["tool_choice"] == "none"
+    request = client._client.chat.completions.last_kwargs
+    assert "tools" not in request
+    assert "tool_choice" not in request
 
 
 def test_use_tools_true_sends_tool_choice_auto():
@@ -78,7 +80,9 @@ def test_use_tools_true_sends_tool_choice_auto():
         await client.infer(_HISTORY, "m", use_tools=True)
 
     asyncio.run(_run())
-    assert client._client.chat.completions.last_kwargs["tool_choice"] == "auto"
+    request = client._client.chat.completions.last_kwargs
+    assert request["tool_choice"] == "auto"
+    assert request["tools"][0]["function"]["name"] == "inspect"
 
 
 def test_default_uses_tools():
@@ -89,6 +93,13 @@ def test_default_uses_tools():
 
     asyncio.run(_run())
     assert client._client.chat.completions.last_kwargs["tool_choice"] == "auto"
+
+
+def _tool():
+    def inspect_page() -> None:
+        return None
+
+    return {"name": "inspect", "description": "Inspect the page.", "tool_function": inspect_page}
 
 
 def _run_all():
