@@ -102,20 +102,47 @@ def test_discover_tasks_does_not_treat_plain_model_text_as_a_task_list():
     assert len(llm.histories) == 4
 
 
-def test_discover_tasks_executes_preceding_devtools_calls_before_completion():
+def test_discover_tasks_observes_a_rejected_batch_before_completion():
     llm = _ScriptedLlm(
         [
             [
                 _devtools_call(),
                 _completion_call(["Review account settings."], incomplete=False),
-            ]
+            ],
+            [_completion_call(["Review account settings."], incomplete=False)],
         ]
     )
 
     discovery = _discover(_config(), llm)
 
     assert discovery.tasks[0]["description"] == "Review account settings."
-    assert llm.executed_calls == ["inspect_page", "complete_discovery"]
+    assert llm.executed_calls == ["complete_discovery"]
+    assert "received 2" in llm.histories[2][-1]["content"]
+
+
+def test_discover_tasks_counts_a_rejected_action_against_its_budget():
+    llm = _ScriptedLlm([[]])
+
+    try:
+        _discover(_config(discovery_max_steps=1), llm)
+    except RuntimeError as error:
+        assert str(error) == "Discovery found no suitable task"
+    else:
+        raise AssertionError("Expected rejected discovery action to consume its budget")
+    assert llm.executed_calls == []
+
+
+def test_discover_tasks_observes_unknown_and_invalid_argument_calls_before_completion():
+    unknown = {"id": "unknown", "tool": {"name": "missing", "description": "", "tool_function": lambda: None}, "arguments": {}}
+    invalid = {"id": "invalid", "tool": {"name": "inspect_page", "description": "", "tool_function": lambda: None}, "arguments": {"unexpected": True}}
+    llm = _ScriptedLlm([[unknown], [invalid], [_completion_call(["Create an account."], incomplete=False)]])
+
+    discovery = _discover(_config(), llm)
+
+    assert discovery.tasks[0]["description"] == "Create an account."
+    assert llm.executed_calls == ["complete_discovery"]
+    assert "unknown tool 'missing'" in llm.histories[2][-1]["content"]
+    assert "invalid arguments for 'inspect_page'" in llm.histories[4][-1]["content"]
 
 
 def test_discover_tasks_returns_partial_tasks_when_budget_ends_after_checkpoint():
@@ -212,9 +239,12 @@ class _LeakingReasoningLlm(LlmClient):
 
 
 def _completion_call(task_descriptions, incomplete):
+    def complete_discovery(task_descriptions: list, incomplete: bool):
+        return None
+
     return {
         "id": "complete-1",
-        "tool": {"name": "complete_discovery", "description": "", "tool_function": lambda: None},
+        "tool": {"name": "complete_discovery", "description": "", "tool_function": complete_discovery},
         "arguments": {"task_descriptions": task_descriptions, "incomplete": incomplete},
     }
 
