@@ -139,8 +139,10 @@ def build_verify_prompt(task: WorkflowTask, candidate_reference: int, candidate:
         "never return an action turn without a tool call. Wait for its observation before making "
         "another tool call in a new action turn. If the next action is unclear, call "
         "get_speech_log or get_focus_info for the next observation. Complete by calling "
-        "complete_verification with confirmed or discarded status and supporting "
-        "NVDA evidence."
+        "complete_verification with confirmed or discarded status and supporting NVDA evidence. "
+        "A confirmed completion must also provide description, expected_behavior, actual_behavior, "
+        "and a non-empty reproduction_steps list; use discarded when the evidence does not support "
+        "a complete confirmed barrier."
     )
 
 
