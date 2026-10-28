@@ -28,6 +28,7 @@ def test_discovery_prompt_requests_numbered_tasks_without_findings():
     assert "numbered" in prompt
     assert "ordinary-user tasks" in prompt
     assert "Do not make accessibility findings" in prompt
+    _assert_interactive_cycle(prompt)
 
 
 def test_discovery_completion_contract_returns_task_descriptions_only():
@@ -54,6 +55,7 @@ def test_solve_task_prompt_uses_only_the_task_and_reports_observed_barriers():
     assert "evidence" in prompt
     assert "complete_solve_task" in prompt
     assert "DevTools" not in prompt
+    _assert_interactive_cycle(prompt)
 
     tool = make_solve_task_completion_tool()
     assert tool["tool_function"](status="succeeded", summary="Order confirmed.") == "solve task completed"
@@ -86,6 +88,7 @@ def test_retrospective_prompt_uses_immutable_solve_history_for_candidates_only()
     assert "create_candidate" in prompt
     assert "complete_retrospective" in prompt
     assert "Do not report a confirmed barrier" in prompt
+    assert "Use a Reason-Act-Observe loop" not in prompt
 
     candidate_tool = make_candidate_creation_tool()
     assert candidate_tool["tool_function"](
@@ -116,6 +119,8 @@ def test_verify_prompt_receives_only_task_candidate_and_brief():
     assert "exactly one tool call" in prompt
     assert "Wait for its observation" in prompt
     assert "DevTools" not in prompt
+    assert "name exactly one next executable" not in prompt
+    _assert_interactive_cycle(prompt)
 
     tool = make_verify_completion_tool()
     assert tool["tool_function"](
@@ -142,6 +147,7 @@ def test_report_enrichment_prompt_cannot_change_the_confirmed_barrier():
     assert "Submit button has no name." in prompt
     assert "implementation context" in prompt
     assert "Do not alter the confirmed barrier" in prompt
+    _assert_interactive_cycle(prompt)
 
     tool = make_report_enrichment_completion_tool()
     assert tool["tool_function"](
@@ -186,6 +192,13 @@ def _barrier():
 def _schema_properties(tool):
     schema = OpenaiLlmClient._convert_tool(tool)
     return set(schema["function"]["parameters"]["properties"])
+
+
+def _assert_interactive_cycle(prompt):
+    assert "Reason concisely assesses" in prompt
+    assert "exactly one structured tool call" in prompt
+    assert "Observation" in prompt
+    assert "Completion is an ordinary Action" in prompt
 
 
 def _run_all():
