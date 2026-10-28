@@ -19,7 +19,6 @@ from a11y_gent.model.workflow import (
     WorkflowTask,
 )
 from a11y_gent.prompts import build_verify_prompt, make_verify_completion_tool
-from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
 from a11y_gent.runtime.action_contract import rejected_action, validate_action
 
 
@@ -97,7 +96,6 @@ def initial_verification_state(
 def _reason_node(llm: LlmClient, model: str):
     async def reason(state: VerificationState) -> VerificationState:
         response = await llm.infer(state["history"], model, use_tools=False)
-        assert_plain_text_reasoning(response["message"]["content"])
         return {**state, "history": [*state["history"], response["message"]]}
 
     return reason

@@ -13,7 +13,6 @@ from a11y_gent.model.tool_call import SerializedToolCall, deserialize_tool_call,
 from a11y_gent.model.verdict import Verdict, VerdictStatus
 from a11y_gent.model.workflow import WorkflowTask
 from a11y_gent.prompts import build_solve_task_prompt, make_solve_task_completion_tool
-from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
 from a11y_gent.runtime.action_contract import rejected_action, validate_action
 from a11y_gent.tooling.barrier import make_barrier_tool
 from a11y_gent.tooling.extract import extract_barriers
@@ -88,7 +87,6 @@ def initial_solve_task_state(task: WorkflowTask) -> SolveTaskState:
 def _reason_node(llm: LlmClient, model: str):
     async def reason(state: SolveTaskState) -> SolveTaskState:
         response = await llm.infer(state["history"], model, use_tools=False)
-        assert_plain_text_reasoning(response["message"]["content"])
         return {**state, "history": [*state["history"], response["message"]]}
 
     return reason

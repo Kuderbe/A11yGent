@@ -4,7 +4,6 @@ from langgraph.graph import END, START, StateGraph
 
 from a11y_gent import observability
 from a11y_gent.profiles.baseline.state import BaselineState
-from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
 from a11y_gent.runtime.termination import latest_message_calls
 
 
@@ -24,7 +23,6 @@ async def think_node(state: BaselineState):
     observability.verbose("phase.started", phase="think", step=state["step_count"] + 1)
     observability.debug("phase.started", phase="think", step=state["step_count"] + 1)
     response = await state["llm"].infer(state["discovery_context"], state["model"], use_tools=False)
-    assert_plain_text_reasoning(response["message"]["content"])
     observability.reason(response["message"]["content"])
     observability.verbose("phase.completed", phase="think", step=state["step_count"] + 1, thinking=response["message"]["content"])
     observability.debug("phase.completed", phase="think", step=state["step_count"] + 1, thinking=response["message"]["content"])

@@ -12,7 +12,6 @@ from a11y_gent.model.tool_call import ToolCall, serialize_tool_call
 from a11y_gent.model.verdict import Barrier
 from a11y_gent.model.workflow import BarrierEnrichment
 from a11y_gent.prompts import build_report_enrichment_prompt, make_report_enrichment_completion_tool
-from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
 from a11y_gent.runtime.action_contract import rejected_action, validate_action
 
 
@@ -82,7 +81,6 @@ def _reason_node(llm: LlmClient, model: str):
     async def reason(state: ReportEnrichmentState) -> dict:
         try:
             response = await llm.infer(state["history"], model, use_tools=False)
-            assert_plain_text_reasoning(response["message"]["content"])
         except Exception as error:
             return {"enrichment": _manual_investigation_enrichment(state["barrier"], str(error))}
         return {"history": [*state["history"], response["message"]]}

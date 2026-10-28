@@ -1,7 +1,7 @@
-"""Tests for reasoning-turn validation.
+"""Tests for reasoning-turn history handling.
 
-Offline, no NVDA/network. Reasoning may plan a future action in natural language,
-but must not serialize a tool call as text.
+Offline, no NVDA/network. Reasoning text remains in history while only native
+Action calls can execute tools.
 
 Run standalone with the stdlib:
 
@@ -12,41 +12,6 @@ import asyncio
 
 from a11y_gent.model.message import MessageOrigin
 from a11y_gent.profiles.baseline.graph import think_node
-from a11y_gent.runtime.reasoning import (
-    ReasoningToolCallSyntaxError,
-    assert_plain_text_reasoning,
-)
-
-
-def test_plain_text_reasoning_can_plan_a_report():
-    assert_plain_text_reasoning(
-        "NVDA announced only 'clickable', which confirms a barrier. "
-        "Next action: report the confirmed barrier."
-    )
-
-
-def test_plain_text_reasoning_can_name_a_tool_without_call_syntax():
-    assert_plain_text_reasoning(
-        "The next action should use report_barrier with the observed evidence."
-    )
-
-
-def test_serialized_invoke_syntax_is_rejected():
-    try:
-        assert_plain_text_reasoning('<|channel| invoke name="report_barrier">')
-    except ReasoningToolCallSyntaxError as error:
-        assert "following act turn" in str(error)
-    else:
-        raise AssertionError("Expected serialized invoke syntax to be rejected")
-
-
-def test_tool_call_markup_is_rejected():
-    try:
-        assert_plain_text_reasoning("<tool_call>report_barrier</tool_call>")
-    except ReasoningToolCallSyntaxError:
-        pass
-    else:
-        raise AssertionError("Expected tool-call markup to be rejected")
 
 
 class _LeakingThinkLlm:
@@ -61,7 +26,7 @@ class _LeakingThinkLlm:
         }
 
 
-def test_think_node_rejects_serialized_tool_call_before_appending_it():
+def test_think_node_retains_serialized_tool_call_text_without_executing_it():
     state = {
         "llm": _LeakingThinkLlm(),
         "task": {"url": "http://example.test", "goal": "Check the page."},
@@ -71,12 +36,10 @@ def test_think_node_rejects_serialized_tool_call_before_appending_it():
         "pending_tool_calls": [],
         "step_count": 0,
     }
-    try:
-        asyncio.run(think_node(state))
-    except ReasoningToolCallSyntaxError:
-        pass
-    else:
-        raise AssertionError("Expected think_node to reject serialized tool-call syntax")
+    result = asyncio.run(think_node(state))
+
+    assert result["step_count"] == 1
+    assert result["discovery_context"][-1]["content"] == '<|channel| invoke name="report_barrier">'
 
 
 def _run_all():

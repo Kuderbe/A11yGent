@@ -8,7 +8,6 @@ from a11y_gent.adaptor.llm_client import LlmClient
 from a11y_gent.config import RunConfig
 from a11y_gent.model.message import MessageOrigin
 from a11y_gent.model.workflow import DiscoveryResult
-from a11y_gent.runtime.reasoning import ReasoningToolCallSyntaxError
 from a11y_gent.task_discovery import discover_tasks
 
 
@@ -190,15 +189,13 @@ def test_discover_tasks_fails_when_completion_contains_no_tasks():
         raise AssertionError("Expected discovery with no tasks to fail")
 
 
-def test_discover_tasks_rejects_serialized_tool_calls_in_reasoning():
+def test_discover_tasks_keeps_serialized_tool_call_text_in_reasoning():
     llm = _LeakingReasoningLlm()
 
-    try:
-        _discover(_config(), llm)
-    except ReasoningToolCallSyntaxError:
-        pass
-    else:
-        raise AssertionError("Expected serialized tool-call syntax in reasoning to fail")
+    discovery = _discover(_config(), llm)
+
+    assert discovery.tasks == [{"number": 1, "url": "https://shop.example/", "description": "Browse products."}]
+    assert llm.histories[1][-1]["content"] == '<tool_call name="inspect_page">'
 
 
 def _config(discovery_max_steps=150):
@@ -225,7 +222,21 @@ def _devtools_call():
 
 
 class _LeakingReasoningLlm(LlmClient):
+    def __init__(self):
+        self.histories = []
+
     async def infer(self, history, model, use_tools=True):
+        self.histories.append(history)
+        if use_tools:
+            return {
+                "message": {
+                    "origin": MessageOrigin.ASSISTANT,
+                    "name": "assistant",
+                    "content": "",
+                    "tool_calls": [_completion_call(["Browse products."], incomplete=False)],
+                },
+                "tool_calls": [_completion_call(["Browse products."], incomplete=False)],
+            }
         return {
             "message": {
                 "origin": MessageOrigin.ASSISTANT,
@@ -235,7 +246,12 @@ class _LeakingReasoningLlm(LlmClient):
         }
 
     async def execute_tool_call(self, tool_call):
-        raise AssertionError("Reasoning syntax must fail before any tool execution")
+        return {
+            "origin": MessageOrigin.TOOL,
+            "name": tool_call["tool"]["name"],
+            "content": "discovery completed",
+            "reference_id": tool_call["id"],
+        }
 
 
 def _completion_call(task_descriptions, incomplete):

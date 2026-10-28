@@ -13,7 +13,6 @@ from a11y_gent.model.tool import Tool
 from a11y_gent.model.tool_call import ToolCall, serialize_tool_call
 from a11y_gent.model.workflow import DiscoveryResult, WorkflowTask
 from a11y_gent.prompts import build_discovery_prompt
-from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
 from a11y_gent.runtime.action_contract import rejected_action, validate_action
 
 
@@ -81,7 +80,6 @@ def initial_discovery_state(config: RunConfig) -> DiscoveryState:
 def _reason_node(llm: LlmClient, model: str):
     async def reason(state: DiscoveryState) -> DiscoveryState:
         response = await llm.infer(state["history"], model, use_tools=False)
-        assert_plain_text_reasoning(response["message"]["content"])
         return {**state, "history": [*state["history"], response["message"]]}
 
     return reason
