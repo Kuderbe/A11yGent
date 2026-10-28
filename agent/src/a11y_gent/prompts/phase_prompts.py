@@ -6,6 +6,103 @@ from a11y_gent.model.verdict import Barrier
 from a11y_gent.model.workflow import Candidate, WorkflowTask
 
 
+_DISCOVERY_EXAMPLE = """Example flow:
+1. Reason 1 (assistant): I need the page structure before identifying ordinary-user tasks.
+   Act (assistant): {"tool_calls": [{"id": "discovery-1", "name": "<available_devtools_tool>", "arguments": {}}]}
+   Observe (tool): {"reference_id": "discovery-1", "content": "Product list with Cart navigation."}
+2. Reason 2 (assistant): I need the available product actions.
+   Act (assistant): {"tool_calls": [{"id": "discovery-2", "name": "<available_devtools_tool>", "arguments": {}}]}
+   Observe (tool): {"reference_id": "discovery-2", "content": "Each product has an Add to cart button."}
+3. Reason 3 (assistant): I need evidence that Cart leads to checkout.
+   Act (assistant): {"tool_calls": [{"id": "discovery-3", "name": "<available_devtools_tool>", "arguments": {}}]}
+   Observe (tool): {"reference_id": "discovery-3", "content": "Cart contains a Checkout button."}
+4. Reason 4 (assistant): I need to confirm that checkout has a user-visible completion state.
+   Act (assistant): {"tool_calls": [{"id": "discovery-4", "name": "<available_devtools_tool>", "arguments": {}}]}
+   Observe (tool): {"reference_id": "discovery-4", "content": "Checkout can lead to an order confirmation."}
+5. Reason 5 (assistant): I have enough evidence for distinct tasks and must now end Discovery.
+   Act (assistant): {"tool_calls": [{"id": "discovery-5", "name": "complete_discovery", "arguments": {"task_descriptions": ["Browse products.", "Add a product to the cart.", "Complete checkout."], "incomplete": false}}]}
+   Observe (tool): {"reference_id": "discovery-5", "content": "discovery completed"}
+Discovery ends with complete_discovery. Do not continue exploring after its observation."""
+
+_SOLVE_TASK_EXAMPLE = """Example flow:
+1. Reason 1 (assistant): I need the current document focus before navigating.
+   Act (assistant): {"tool_calls": [{"id": "solve-1", "name": "get_focus_info", "arguments": {}}]}
+   Observe (tool): {"reference_id": "solve-1", "content": "{\\"role\\": \\"DOCUMENT\\", \\"name\\": \\"Notes - Toolbar\\"}"}
+2. Reason 2 (assistant): I need a clean speech window for task evidence.
+   Act (assistant): {"tool_calls": [{"id": "solve-2", "name": "clear_speech_log", "arguments": {}}]}
+   Observe (tool): {"reference_id": "solve-2", "content": "speech log cleared"}
+3. Reason 3 (assistant): I need to find the next button in the focused document.
+   Act (assistant): {"tool_calls": [{"id": "solve-3", "name": "send_key", "arguments": {"gesture": "b"}}]}
+   Observe (tool): {"reference_id": "solve-3", "content": "{\\"ok\\": true, \\"gesture\\": \\"b\\"}"}
+4. Reason 4 (assistant): I need the spoken result of the navigation action.
+   Act (assistant): {"tool_calls": [{"id": "solve-4", "name": "get_last_spoken", "arguments": {}}]}
+   Observe (tool): {"reference_id": "solve-4", "content": "{\\"entry\\": {\\"text\\": \\"button Save note\\"}}"}
+5. Reason 5 (assistant): The Save note button is identified, so I need to activate it.
+   Act (assistant): {"tool_calls": [{"id": "solve-5", "name": "send_key", "arguments": {"gesture": "enter"}}]}
+   Observe (tool): {"reference_id": "solve-5", "content": "{\\"ok\\": true, \\"gesture\\": \\"enter\\"}"}
+6. Reason 6 (assistant): I need the NVDA result after activation.
+   Act (assistant): {"tool_calls": [{"id": "solve-6", "name": "get_last_spoken", "arguments": {}}]}
+   Observe (tool): {"reference_id": "solve-6", "content": "{\\"entry\\": {\\"text\\": \\"Note saved.\\"}}"}
+7. Reason 7 (assistant): NVDA confirms the goal, so I must end Solve task.
+   Act (assistant): {"tool_calls": [{"id": "solve-7", "name": "complete_solve_task", "arguments": {"status": "succeeded", "summary": "NVDA announced Note saved. after activating Save note."}}]}
+   Observe (tool): {"reference_id": "solve-7", "content": "solve task completed"}
+Solve task ends with complete_solve_task. Do not take more task actions after its observation."""
+
+_RETROSPECTIVE_EXAMPLE = """Example flow:
+1. Reason 1 (assistant): The history shows an action without observed result feedback, so it supports a candidate.
+   Act (assistant): {"tool_calls": [{"id": "retro-1", "name": "create_candidate", "arguments": {"description": "Result feedback may not be announced.", "verification_brief": "Activate the control and inspect NVDA speech for result feedback."}}]}
+   Observe (tool): {"reference_id": "retro-1", "content": "candidate created"}
+2. Reason 2 (assistant): I need to consider whether focus after that action is a distinct unreported condition.
+   Act (assistant): {"tool_calls": [{"id": "retro-2", "name": "create_candidate", "arguments": {"description": "Focus may not move to the result.", "verification_brief": "Activate the control, then inspect NVDA focus and speech."}}]}
+   Observe (tool): {"reference_id": "retro-2", "content": "candidate created"}
+3. Reason 3 (assistant): I need to consider the clarity of the observed status separately.
+   Act (assistant): {"tool_calls": [{"id": "retro-3", "name": "create_candidate", "arguments": {"description": "The status message may be unclear.", "verification_brief": "Repeat the action and inspect the exact NVDA announcement."}}]}
+   Observe (tool): {"reference_id": "retro-3", "content": "candidate created"}
+4. Reason 4 (assistant): A further unreported suspected condition is distinct from the existing candidates.
+   Act (assistant): {"tool_calls": [{"id": "retro-4", "name": "create_candidate", "arguments": {"description": "A newly identified condition requires targeted NVDA checking.", "verification_brief": "Use only NVDA observations and keyboard actions to check this condition."}}]}
+   Observe (tool): {"reference_id": "retro-4", "content": "candidate created"}
+5. Reason 5 (assistant): No further unreported suspected condition is grounded in the history, so I must end Retrospective.
+   Act (assistant): {"tool_calls": [{"id": "retro-5", "name": "complete_retrospective", "arguments": {}}]}
+   Observe (tool): {"reference_id": "retro-5", "content": "retrospective completed"}
+Retrospective ends with complete_retrospective. Never use it to confirm a barrier."""
+
+_VERIFY_EXAMPLE = """Example flow:
+1. Reason 1 (assistant): I need the current focus before following the verification brief.
+   Act (assistant): {"tool_calls": [{"id": "verify-1", "name": "get_focus_info", "arguments": {}}]}
+   Observe (tool): {"reference_id": "verify-1", "content": "{\\"role\\": \\"BUTTON\\", \\"name\\": \\"Save note\\"}"}
+2. Reason 2 (assistant): I need a clean speech window for the candidate test.
+   Act (assistant): {"tool_calls": [{"id": "verify-2", "name": "clear_speech_log", "arguments": {}}]}
+   Observe (tool): {"reference_id": "verify-2", "content": "speech log cleared"}
+3. Reason 3 (assistant): The candidate concerns feedback after activation, so I should activate the focused button.
+   Act (assistant): {"tool_calls": [{"id": "verify-3", "name": "send_key", "arguments": {"gesture": "enter"}}]}
+   Observe (tool): {"reference_id": "verify-3", "content": "{\\"ok\\": true, \\"gesture\\": \\"enter\\"}"}
+4. Reason 4 (assistant): I need the NVDA evidence produced by activation.
+   Act (assistant): {"tool_calls": [{"id": "verify-4", "name": "get_speech_log", "arguments": {}}]}
+   Observe (tool): {"reference_id": "verify-4", "content": "{\\"entries\\": [{\\"text\\": \\"Note saved.\\"}], \\"count\\": 1}"}
+5. Reason 5 (assistant): The expected feedback was announced, so the candidate is unsupported and I must end Verify.
+   Act (assistant): {"tool_calls": [{"id": "verify-5", "name": "complete_verification", "arguments": {"status": "discarded", "evidence": "NVDA announced Note saved. after activation."}}]}
+   Observe (tool): {"reference_id": "verify-5", "content": "verification completed"}
+Verify ends with complete_verification. If the evidence instead confirms the candidate, use status confirmed plus description, expected_behavior, actual_behavior, and complete-sentence reproduction_steps."""
+
+_REPORT_ENRICHMENT_EXAMPLE = """Example flow:
+1. Reason 1 (assistant): I need the relevant page structure for the confirmed barrier.
+   Act (assistant): {"tool_calls": [{"id": "enrich-1", "name": "<available_devtools_tool>", "arguments": {}}]}
+   Observe (tool): {"reference_id": "enrich-1", "content": "Toolbar contains an icon-only action button."}
+2. Reason 2 (assistant): I need the button attributes that can supply its accessible name.
+   Act (assistant): {"tool_calls": [{"id": "enrich-2", "name": "<available_devtools_tool>", "arguments": {}}]}
+   Observe (tool): {"reference_id": "enrich-2", "content": "The button has no text, aria-label, or aria-labelledby value."}
+3. Reason 3 (assistant): I need the component context to identify a narrow remediation target.
+   Act (assistant): {"tool_calls": [{"id": "enrich-3", "name": "<available_devtools_tool>", "arguments": {}}]}
+   Observe (tool): {"reference_id": "enrich-3", "content": "The button belongs to the toolbar action component."}
+4. Reason 4 (assistant): I need to confirm whether a nearby visible label can be referenced.
+   Act (assistant): {"tool_calls": [{"id": "enrich-4", "name": "<available_devtools_tool>", "arguments": {}}]}
+   Observe (tool): {"reference_id": "enrich-4", "content": "No visible text label is associated with the button."}
+5. Reason 5 (assistant): I have enough developer-facing context and must end enrichment without changing the barrier.
+   Act (assistant): {"tool_calls": [{"id": "enrich-5", "name": "complete_report_enrichment", "arguments": {"title": "Unnamed toolbar action", "implementation_context": "An icon-only toolbar button has no text or ARIA naming attribute.", "remediation_target": "toolbar action component", "suggested_fix": "Provide an accessible name with visible text, aria-label, or aria-labelledby."}}]}
+   Observe (tool): {"reference_id": "enrich-5", "content": "report enrichment completed"}
+Report enrichment ends with complete_report_enrichment. Do not change the confirmed barrier."""
+
+
 def build_discovery_prompt(url: str, instructions: str | None = None) -> str:
     """Build the DevTools-only contract for ordinary-user task discovery."""
     instruction_block = f"\nInstructions: {instructions}" if instructions else ""
@@ -16,7 +113,8 @@ def build_discovery_prompt(url: str, instructions: str | None = None) -> str:
         "exploration plan without calling tools; Act makes exactly one structured tool call; Observe uses "
         "its result before the next Reason step. Completion is an ordinary Action and has an Observation. "
         "Explore only as needed to understand ordinary-user goals. Do not make accessibility findings. Complete by calling complete_discovery with short, "
-        "numbered task descriptions in their intended execution order."
+        "numbered task descriptions in their intended execution order.\n\n"
+        f"{_DISCOVERY_EXAMPLE}"
     )
 
 
@@ -58,7 +156,8 @@ def build_solve_task_prompt(task: WorkflowTask) -> str:
         "Reason step. Completion is an ordinary Action and has an Observation. Complete by calling "
         "complete_solve_task with status 'succeeded' when NVDA evidence confirms the task goal, or 'failed' "
         "only when the task cannot be completed. Do not use succeeded_with_avoidable_difficulty here: final "
-        "task status is derived later from confirmed barriers. Include a concise evidence-grounded summary."
+        "task status is derived later from confirmed barriers. Include a concise evidence-grounded summary.\n\n"
+        f"{_SOLVE_TASK_EXAMPLE}"
     )
 
 
@@ -89,7 +188,8 @@ def build_retrospective_prompt(task: WorkflowTask, solve_task_history: list[Mess
         "create_candidate with one description and an NVDA-only verification brief. The brief may use "
         "only the available NVDA observations and keyboard actions; never request DOM, DevTools, browser "
         "accessibility-inspector, or human checks. Create at most one candidate per iteration. When no further candidates remain, "
-        "call complete_retrospective without candidate values."
+        "call complete_retrospective without candidate values.\n\n"
+        f"{_RETROSPECTIVE_EXAMPLE}"
     )
 
 
@@ -149,7 +249,8 @@ def build_verify_prompt(task: WorkflowTask, candidate_reference: int, candidate:
         "for actions actually performed during verification: for example, navigate to the control, activate it, "
         "then observe the missing feedback. Do not split a sentence into words or characters, enumerate every "
         "keystroke, or include unperformed steps. Use discarded when the evidence does not support "
-        "a complete confirmed barrier."
+        "a complete confirmed barrier.\n\n"
+        f"{_VERIFY_EXAMPLE}"
     )
 
 
@@ -192,7 +293,8 @@ def build_report_enrichment_prompt(barrier: Barrier) -> str:
         "DevTools plan without calling tools; Act makes exactly one structured tool call; Observe uses its "
         "result before the next Reason step. Completion is an ordinary Action and has an Observation. Provide implementation context, a remediation target, and a suggested fix. "
         "Do not alter the confirmed barrier. Complete by calling "
-        "complete_report_enrichment."
+        "complete_report_enrichment.\n\n"
+        f"{_REPORT_ENRICHMENT_EXAMPLE}"
     )
 
 

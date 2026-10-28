@@ -217,6 +217,35 @@ def _assert_interactive_cycle(prompt):
     assert "Completion is an ordinary Action" in prompt
 
 
+def test_each_phase_prompt_includes_an_example_flow_and_completion_action():
+    prompts_and_completion_tools = [
+        (build_discovery_prompt("https://shop.example/"), "complete_discovery"),
+        (build_solve_task_prompt(_task()), "complete_solve_task"),
+        (build_retrospective_prompt(_task(), _solve_history()), "complete_retrospective"),
+        (
+            build_verify_prompt(
+                _task(),
+                1,
+                {
+                    "description": "The confirmation may not be announced.",
+                    "verification_brief": "Submit and inspect NVDA speech.",
+                },
+            ),
+            "complete_verification",
+        ),
+        (build_report_enrichment_prompt(_barrier()), "complete_report_enrichment"),
+    ]
+
+    for prompt, completion_tool in prompts_and_completion_tools:
+        assert "Example flow:" in prompt
+        example = prompt.split("Example flow:", maxsplit=1)[1]
+        assert example.count("Reason ") >= 5
+        assert example.count("Act (assistant):") >= 5
+        assert example.count("Observe (tool):") >= 5
+        assert '"tool_calls": [' in example
+        assert f'"name": "{completion_tool}"' in example
+
+
 def _run_all():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:
