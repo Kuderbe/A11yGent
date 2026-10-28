@@ -86,6 +86,54 @@ def test_verify_candidate_marks_budget_exhaustion_as_unverified():
     }
 
 
+def test_verify_candidate_observes_a_rejected_multiple_call_before_retrying():
+    llm = _ScriptedLlm(
+        [
+            [_nvda_call(), _completion_call("discarded", evidence="NVDA announces the confirmation.")],
+            [_completion_call("discarded", evidence="NVDA announces the confirmation.")],
+        ]
+    )
+
+    outcome = _verify(llm)
+
+    assert outcome["status"] is VerificationOutcomeStatus.DISCARDED
+    assert llm.executed_calls == ["complete_verification"]
+    observation = llm.histories[2][-1]
+    assert observation["origin"] is MessageOrigin.TOOL
+    assert "received 2" in observation["content"]
+
+
+def test_verify_candidate_observes_a_rejected_missing_call_before_retrying():
+    llm = _ScriptedLlm([[], [_completion_call("discarded", evidence="NVDA announces the confirmation.")]])
+
+    outcome = _verify(llm)
+
+    assert outcome["status"] is VerificationOutcomeStatus.DISCARDED
+    assert llm.executed_calls == ["complete_verification"]
+    observation = llm.histories[2][-1]
+    assert observation["name"] == "action_contract"
+    assert "received 0" in observation["content"]
+
+
+def test_verify_candidate_counts_a_rejected_action_against_its_budget():
+    outcome = _verify(_ScriptedLlm([[]]), nvda_max_steps=1)
+
+    assert outcome["status"] is VerificationOutcomeStatus.UNVERIFIED_BUDGET_EXHAUSTED
+
+
+def test_verify_candidate_observes_unknown_and_invalid_argument_calls_before_retrying():
+    unknown = {"id": "unknown", "tool": {"name": "missing", "description": "", "tool_function": lambda: None}, "arguments": {}}
+    invalid = {"id": "invalid", "tool": {"name": "read_speech", "description": "", "tool_function": lambda: None}, "arguments": {"unexpected": True}}
+    llm = _ScriptedLlm([[unknown], [invalid], [_completion_call("discarded", evidence="NVDA announces the confirmation.")]])
+
+    outcome = _verify(llm)
+
+    assert outcome["status"] is VerificationOutcomeStatus.DISCARDED
+    assert llm.executed_calls == ["complete_verification"]
+    assert "unknown tool 'missing'" in llm.histories[2][-1]["content"]
+    assert "invalid arguments for 'read_speech'" in llm.histories[4][-1]["content"]
+
+
 def test_verify_candidate_records_tool_failure_as_unverified_execution_error():
     llm = _FailingLlm()
 

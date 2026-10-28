@@ -85,26 +85,51 @@ def test_solve_task_keeps_attempts_isolated_by_task_number():
     assert llm.executed_calls == ["complete_solve_task", "complete_solve_task"]
 
 
-def test_solve_task_rejects_multiple_tool_calls_in_one_action_turn():
-    llm = _ScriptedLlm([[_barrier_call(), _nvda_call()]])
+def test_solve_task_observes_a_rejected_multiple_call_before_retrying():
+    llm = _ScriptedLlm([[_barrier_call(), _nvda_call()], [_completion_call("succeeded", "Order placed.")]])
 
-    try:
-        _solve(llm)
-    except RuntimeError as error:
-        assert "exactly one tool call" in str(error)
-    else:
-        raise AssertionError("Solve task must not execute multiple tool calls in one action turn")
+    result = _solve(llm)
+
+    assert result["status"] is VerdictStatus.SUCCEEDED
+    assert llm.executed_calls == ["complete_solve_task"]
+    observation = llm.histories[2][-1]
+    assert observation["origin"] is MessageOrigin.TOOL
+    assert "received 2" in observation["content"]
 
 
-def test_solve_task_rejects_an_action_turn_without_a_tool_call():
+def test_solve_task_observes_a_rejected_missing_call_before_retrying():
+    llm = _ScriptedLlm([[], [_completion_call("succeeded", "Order placed.")]])
+
+    result = _solve(llm)
+
+    assert result["status"] is VerdictStatus.SUCCEEDED
+    assert llm.executed_calls == ["complete_solve_task"]
+    observation = llm.histories[2][-1]
+    assert observation["name"] == "action_contract"
+    assert "received 0" in observation["content"]
+    assert "tool_calls" not in llm.histories[2][-2]
+
+
+def test_solve_task_counts_a_rejected_action_against_its_budget():
     llm = _ScriptedLlm([[]])
 
-    try:
-        _solve(llm)
-    except RuntimeError as error:
-        assert "exactly one tool call" in str(error)
-    else:
-        raise AssertionError("Solve task must not accept an action turn without a tool call")
+    result = _solve(llm, nvda_max_steps=1)
+
+    assert result["status"] is VerdictStatus.FAILED
+    assert llm.executed_calls == []
+
+
+def test_solve_task_observes_unknown_and_invalid_argument_calls_before_retrying():
+    unknown = {"id": "unknown", "tool": {"name": "missing", "description": "", "tool_function": lambda: None}, "arguments": {}}
+    invalid = {"id": "invalid", "tool": {"name": "read_speech", "description": "", "tool_function": lambda: None}, "arguments": {"unexpected": True}}
+    llm = _ScriptedLlm([[unknown], [invalid], [_completion_call("succeeded", "Order placed.")]])
+
+    result = _solve(llm)
+
+    assert result["status"] is VerdictStatus.SUCCEEDED
+    assert llm.executed_calls == ["complete_solve_task"]
+    assert "unknown tool 'missing'" in llm.histories[2][-1]["content"]
+    assert "invalid arguments for 'read_speech'" in llm.histories[4][-1]["content"]
 
 
 def _solve(llm, nvda_max_steps=3):

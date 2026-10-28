@@ -5,6 +5,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from a11y_gent.adaptor.llm_client import LlmClient
+from a11y_gent.adaptor.llm_response import ToolCallConversionError
 from a11y_gent.config import RunConfig
 from a11y_gent.model.message import Message, MessageOrigin
 from a11y_gent.model.tool import Tool
@@ -19,6 +20,7 @@ from a11y_gent.model.workflow import (
 )
 from a11y_gent.prompts import build_verify_prompt, make_verify_completion_tool
 from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
+from a11y_gent.runtime.action_contract import rejected_action, validate_action
 
 
 class VerificationState(TypedDict):
@@ -29,6 +31,7 @@ class VerificationState(TypedDict):
     candidate: Candidate
     history: list[Message]
     pending_tool_calls: list[SerializedToolCall]
+    pending_observations: list[Message]
     step_count: int
     outcome: VerificationOutcome | None
 
@@ -61,11 +64,11 @@ async def verify_candidate(
 def build_verification_graph(llm: LlmClient, model: str, max_steps: int, tools: list[Tool]):
     graph = StateGraph(VerificationState)
     graph.add_node("reason", _reason_node(llm, model))
-    graph.add_node("act", _act_node(llm, model))
+    graph.add_node("act", _act_node(llm, model, tools))
     graph.add_node("observe", _observe_node(llm, tools))
     graph.add_edge(START, "reason")
     graph.add_edge("reason", "act")
-    graph.add_conditional_edges("act", _after_act, {"observe": "observe", "reason": "reason"})
+    graph.add_edge("act", "observe")
     graph.add_conditional_edges("observe", _after_observe(max_steps), {"reason": "reason", "done": END})
     return graph.compile()
 
@@ -85,6 +88,7 @@ def initial_verification_state(
             }
         ],
         "pending_tool_calls": [],
+        "pending_observations": [],
         "step_count": 0,
         "outcome": None,
     }
@@ -99,17 +103,27 @@ def _reason_node(llm: LlmClient, model: str):
     return reason
 
 
-def _act_node(llm: LlmClient, model: str):
+def _act_node(llm: LlmClient, model: str, tools: list[Tool]):
     async def act(state: VerificationState) -> VerificationState:
-        response = await llm.infer(state["history"], model)
-        tool_calls = response.get("tool_calls", [])
-        if len(tool_calls) != 1:
-            raise RuntimeError("Verification action turns must contain exactly one tool call")
-        calls = [serialize_tool_call(call) for call in tool_calls]
+        try:
+            response = await llm.infer(state["history"], model)
+        except ToolCallConversionError as error:
+            action, observation = rejected_action(error)
+            return {
+                **state,
+                "history": [*state["history"], action],
+                "pending_tool_calls": [],
+                "pending_observations": [observation],
+                "step_count": state["step_count"] + 1,
+            }
+        calls = [serialize_tool_call(call) for call in response.get("tool_calls", [])]
+        action = _action_message(response["message"], calls)
+        validation = validate_action(action, {tool["name"]: tool for tool in tools})
         return {
             **state,
-            "history": [*state["history"], _action_message(response["message"], calls)],
-            "pending_tool_calls": calls,
+            "history": [*state["history"], action],
+            "pending_tool_calls": validation["pending_tool_calls"],
+            "pending_observations": validation["observations"],
             "step_count": state["step_count"] + 1,
         }
 
@@ -122,6 +136,7 @@ def _observe_node(llm: LlmClient, tools: list[Tool]):
     async def observe(state: VerificationState) -> VerificationState:
         history = list(state["history"])
         outcome = state["outcome"]
+        history.extend(state["pending_observations"])
         for call in state["pending_tool_calls"]:
             try:
                 history.append(await llm.execute_tool_call(deserialize_tool_call(call, tools_by_name)))
@@ -130,7 +145,13 @@ def _observe_node(llm: LlmClient, tools: list[Tool]):
                 break
             if call["tool"]["name"] == "complete_verification":
                 outcome = _outcome(state["candidate_reference"], call["arguments"])
-        return {**state, "history": history, "outcome": outcome, "pending_tool_calls": []}
+        return {
+            **state,
+            "history": history,
+            "outcome": outcome,
+            "pending_tool_calls": [],
+            "pending_observations": [],
+        }
 
     return observe
 
@@ -148,10 +169,6 @@ def _execution_error_outcome(state: VerificationState, message: str) -> Verifica
         "evidence": message,
         "execution_error": error,
     }
-
-
-def _after_act(state: VerificationState) -> str:
-    return "observe" if state["pending_tool_calls"] else "reason"
 
 
 def _after_observe(max_steps: int):
@@ -197,7 +214,9 @@ def _barrier(arguments: dict) -> Barrier:
 
 
 def _action_message(message: Message, calls: list[SerializedToolCall]) -> Message:
-    return {
+    action: Message = {
         **{key: value for key, value in message.items() if key != "tool_calls"},
-        "tool_calls": calls,
     }
+    if calls:
+        action["tool_calls"] = calls
+    return action

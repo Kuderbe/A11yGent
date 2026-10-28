@@ -5,6 +5,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from a11y_gent.adaptor.llm_client import LlmClient
+from a11y_gent.adaptor.llm_response import ToolCallConversionError
 from a11y_gent.config import RunConfig
 from a11y_gent.model.message import Message, MessageOrigin
 from a11y_gent.model.tool import Tool
@@ -13,6 +14,7 @@ from a11y_gent.model.verdict import Verdict, VerdictStatus
 from a11y_gent.model.workflow import WorkflowTask
 from a11y_gent.prompts import build_solve_task_prompt, make_solve_task_completion_tool
 from a11y_gent.runtime.reasoning import assert_plain_text_reasoning
+from a11y_gent.runtime.action_contract import rejected_action, validate_action
 from a11y_gent.tooling.barrier import make_barrier_tool
 from a11y_gent.tooling.extract import extract_barriers
 
@@ -25,6 +27,7 @@ class SolveTaskState(TypedDict):
     status: str
     summary: str
     pending_tool_calls: list[SerializedToolCall]
+    pending_observations: list[Message]
     step_count: int
 
 
@@ -55,11 +58,11 @@ async def solve_task(
 def build_solve_task_graph(llm: LlmClient, model: str, max_steps: int, tools: list[Tool]):
     graph = StateGraph(SolveTaskState)
     graph.add_node("reason", _reason_node(llm, model))
-    graph.add_node("act", _act_node(llm, model))
+    graph.add_node("act", _act_node(llm, model, tools))
     graph.add_node("observe", _observe_node(llm, tools))
     graph.add_edge(START, "reason")
     graph.add_edge("reason", "act")
-    graph.add_conditional_edges("act", _after_act, {"observe": "observe", "reason": "reason"})
+    graph.add_edge("act", "observe")
     graph.add_conditional_edges("observe", _after_observe(max_steps), {"reason": "reason", "done": END})
     return graph.compile()
 
@@ -77,6 +80,7 @@ def initial_solve_task_state(task: WorkflowTask) -> SolveTaskState:
         "status": "",
         "summary": "",
         "pending_tool_calls": [],
+        "pending_observations": [],
         "step_count": 0,
     }
 
@@ -90,17 +94,27 @@ def _reason_node(llm: LlmClient, model: str):
     return reason
 
 
-def _act_node(llm: LlmClient, model: str):
+def _act_node(llm: LlmClient, model: str, tools: list[Tool]):
     async def act(state: SolveTaskState) -> SolveTaskState:
-        response = await llm.infer(state["history"], model)
-        tool_calls = response.get("tool_calls", [])
-        if len(tool_calls) != 1:
-            raise RuntimeError("Solve task action turns must contain exactly one tool call")
-        calls = [serialize_tool_call(call) for call in tool_calls]
+        try:
+            response = await llm.infer(state["history"], model)
+        except ToolCallConversionError as error:
+            action, observation = rejected_action(error)
+            return {
+                **state,
+                "history": [*state["history"], action],
+                "pending_tool_calls": [],
+                "pending_observations": [observation],
+                "step_count": state["step_count"] + 1,
+            }
+        calls = [serialize_tool_call(call) for call in response.get("tool_calls", [])]
+        action = _action_message(response["message"], calls)
+        validation = validate_action(action, {tool["name"]: tool for tool in tools})
         return {
             **state,
-            "history": [*state["history"], _action_message(response["message"], calls)],
-            "pending_tool_calls": calls,
+            "history": [*state["history"], action],
+            "pending_tool_calls": validation["pending_tool_calls"],
+            "pending_observations": validation["observations"],
             "step_count": state["step_count"] + 1,
         }
 
@@ -115,6 +129,7 @@ def _observe_node(llm: LlmClient, tools: list[Tool]):
         completed = state["completed"]
         status = state["status"]
         summary = state["summary"]
+        history.extend(state["pending_observations"])
         for call in state["pending_tool_calls"]:
             history.append(await llm.execute_tool_call(deserialize_tool_call(call, tools_by_name)))
             if call["tool"]["name"] == "complete_solve_task":
@@ -128,13 +143,10 @@ def _observe_node(llm: LlmClient, tools: list[Tool]):
             "status": status,
             "summary": summary,
             "pending_tool_calls": [],
+            "pending_observations": [],
         }
 
     return observe
-
-
-def _after_act(state: SolveTaskState) -> str:
-    return "observe" if state["pending_tool_calls"] else "reason"
 
 
 def _after_observe(max_steps: int):
@@ -147,10 +159,12 @@ def _after_observe(max_steps: int):
 
 
 def _action_message(message: Message, calls: list[SerializedToolCall]) -> Message:
-    return {
+    action: Message = {
         **{key: value for key, value in message.items() if key != "tool_calls"},
-        "tool_calls": calls,
     }
+    if calls:
+        action["tool_calls"] = calls
+    return action
 
 
 def _status(value: str) -> VerdictStatus:
